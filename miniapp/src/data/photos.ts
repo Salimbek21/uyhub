@@ -47,5 +47,8 @@ export function photoDataUri(seed: number, index: number, size: 'thumb' | 'large
     <circle cx="285" cy="45" r="22" fill="#ffffff" opacity="0.18" />
     ${interior('#ffffff')}
   </svg>`
-  return `data:image/svg+xml;utf8,${encodeURIComponent(svg)}`
+  // `charset=utf-8`, not `utf8`: the latter is not a valid media-type parameter
+  // under RFC 2397. Chrome renders it anyway, but Safari and the Telegram iOS
+  // in-app WebView reject the URI and show nothing.
+  return `data:image/svg+xml;charset=utf-8,${encodeURIComponent(svg)}`
 }
