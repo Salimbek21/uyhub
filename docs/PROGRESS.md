@@ -42,7 +42,7 @@ Ports 15432 / 16379 / 19000 / 19001, bound to 127.0.0.1.
 from `alembic.ini`. Revision `0001` is an intentionally empty baseline that enables
 `pg_trgm`.
 
-**Tests.** 77 tests, all passing. Fixtures for Postgres (session-scoped drop/create/
+**Tests.** 78 tests, all passing. Fixtures for Postgres (session-scoped drop/create/
 migrate, per-test transaction rollback), Redis (DB 15) and S3 (per-test bucket).
 Coverage: settings validation and secret masking, log redaction (phones in fields, in
 free text and in nested structures; sensitive keys; post-text truncation; the stdlib
@@ -75,7 +75,7 @@ Full instructions, including the TLS-proxy and port notes, are in `RUNBOOK.md`.
 | Criterion | Status |
 |---|---|
 | `make up` brings up healthy infrastructure | ✅ all three containers healthy, buckets created |
-| `make test` passes locally | ✅ 77 passed |
+| `make test` passes locally | ✅ 78 passed |
 | `make lint` passes locally | ✅ ruff + `mypy --strict` clean |
 | `make test` and `make lint` pass **in CI** | ⚠️ **not verified** — no git remote yet, so the workflow has never executed |
 

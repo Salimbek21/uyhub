@@ -95,6 +95,32 @@ async def test_readyz_survives_an_unexpected_exception(
     assert response.json()["checks"]["s3"] == "error"
 
 
+def test_create_app_configures_logging(
+    monkeypatch: pytest.MonkeyPatch, capsys: pytest.CaptureFixture[str]
+) -> None:
+    """`uvicorn --reload` forks a worker that imports this module without running
+    the CLI, and that worker serves the requests. If `create_app` does not set
+    logging up, production logs come out in structlog's default format with no
+    `service` field."""
+    import json
+
+    import structlog
+
+    from uyhub.core.config import get_settings
+    from uyhub.core.logging import get_logger
+
+    monkeypatch.setenv("LOG_FORMAT", "json")
+    get_settings.cache_clear()
+    structlog.reset_defaults()
+
+    app_module.create_app()
+    get_logger("tests.worker").info("worker.started")
+
+    record = json.loads(capsys.readouterr().out.strip().splitlines()[-1])
+    assert record["service"] == "api"
+    assert record["event"] == "worker.started"
+
+
 async def test_metrics_endpoint_is_mounted(client: httpx.AsyncClient) -> None:
     response = await client.get("/metrics/")
     assert response.status_code == 200

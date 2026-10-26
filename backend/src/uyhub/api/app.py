@@ -19,7 +19,7 @@ from uyhub import __version__
 from uyhub.core.config import get_settings
 from uyhub.core.db import check_database, dispose_engine
 from uyhub.core.errors import DependencyUnavailableError
-from uyhub.core.logging import get_logger
+from uyhub.core.logging import configure_logging, get_logger
 from uyhub.core.metrics import metrics_app
 from uyhub.core.redis import check_redis, close_redis
 from uyhub.core.s3 import check_s3
@@ -66,8 +66,15 @@ async def lifespan(_app: FastAPI) -> AsyncIterator[None]:
 
 
 def create_app() -> FastAPI:
-    """Build the ASGI application."""
+    """Build the ASGI application.
+
+    Logging is configured here rather than only in the CLI: `uvicorn --reload` and
+    any external ASGI server import this module in a worker process that never ran
+    `uyhub api`, and that worker is the one serving requests. `configure_logging`
+    is idempotent, so the CLI calling it first costs nothing.
+    """
     settings = get_settings()
+    configure_logging("api", level=settings.log_level, log_format=settings.log_format)
     app = FastAPI(
         title="UyHub API",
         version=__version__,
