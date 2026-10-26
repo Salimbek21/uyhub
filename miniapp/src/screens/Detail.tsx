@@ -69,7 +69,7 @@ export function Detail({ id, onBack }: { id: string; onBack: () => void }) {
   return (
     <div className="pb-6">
       <div className="relative">
-        <Gallery photos={listing.photos} />
+        <Gallery photos={listing.photos} seedKey={listing.id} />
         <button
           type="button"
           onClick={onBack}

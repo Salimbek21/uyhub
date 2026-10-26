@@ -3,8 +3,9 @@
 import { useRef, useState } from 'react'
 
 import type { ListingPhoto } from '../types'
+import { Photo } from './Photo'
 
-export function Gallery({ photos }: { photos: ListingPhoto[] }) {
+export function Gallery({ photos, seedKey }: { photos: ListingPhoto[]; seedKey: string }) {
   const [index, setIndex] = useState(0)
   const trackRef = useRef<HTMLDivElement>(null)
 
@@ -26,11 +27,11 @@ export function Gallery({ photos }: { photos: ListingPhoto[] }) {
         className="no-scrollbar flex snap-x snap-mandatory overflow-x-auto"
       >
         {photos.map((photo, i) => (
-          <img
+          <Photo
             key={i}
             src={photo.large_url}
-            alt=""
-            loading={i === 0 ? 'eager' : 'lazy'}
+            seedKey={`${seedKey}-${i}`}
+            eager={i === 0}
             className="aspect-[4/3] w-full shrink-0 snap-center object-cover"
           />
         ))}

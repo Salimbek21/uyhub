@@ -144,8 +144,10 @@ call, uz/ru switching, light and dark themes, 360 px layouts.
 
 ### Known gaps
 
-1. **Photos are generated SVG placeholders**, not photographs. Real images arrive with
-   the collector in Phase 1.
+1. **Photos are drawn placeholders**, not photographs — inline SVG rendered by
+   `components/Photo.tsx`, deliberately not `data:` URIs (those break under a strict
+   `img-src` CSP and in older WebViews). The component shows an `<img>` as soon as a
+   real URL exists, so Phase 1's MinIO images need no screen changes.
 2. **Favourites and saved searches live in `localStorage`**, not on the server. Phase 4
    moves them to the `favorites` and `saved_searches` tables.
 3. **Not yet opened inside a real Telegram client.** That needs an HTTPS tunnel and a

@@ -4,6 +4,7 @@ import { useI18n } from '../i18n/useI18n'
 import { haptic } from '../telegram'
 import type { ListingCard } from '../types'
 import { CameraIcon, HeartIcon } from './Icons'
+import { Photo } from './Photo'
 
 interface Props {
   listing: ListingCard
@@ -32,14 +33,11 @@ export function ListingCardView({ listing, onOpen, onToggleFavorite }: Props) {
         className="flex w-full gap-3 p-3 text-left"
       >
         <div className="relative h-24 w-28 shrink-0 overflow-hidden rounded-xl bg-tg-secondary">
-          {listing.thumb_url ? (
-            <img
-              src={listing.thumb_url}
-              alt=""
-              loading="lazy"
-              className="h-full w-full object-cover"
-            />
-          ) : null}
+          <Photo
+            src={listing.thumb_url}
+            seedKey={listing.id}
+            className="h-full w-full object-cover"
+          />
           {listing.photo_count > 1 ? (
             <span className="absolute bottom-1 right-1 flex items-center gap-1 rounded-md bg-black/55 px-1.5 py-0.5 text-[11px] font-medium text-white">
               <CameraIcon />

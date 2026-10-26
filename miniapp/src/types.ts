@@ -57,8 +57,8 @@ export interface ListingCard {
 
 /** One photo of a listing. */
 export interface ListingPhoto {
-  large_url: string
-  thumb_url: string
+  large_url: string | null
+  thumb_url: string | null
   width: number
   height: number
 }

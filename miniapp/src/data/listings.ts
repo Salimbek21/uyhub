@@ -8,7 +8,6 @@
  */
 
 import type { DistrictId, ListingDetail } from '../types'
-import { photoDataUri } from './photos'
 
 /** Prototype exchange rate. Phase 2 reads the real CBU rate from `exchange_rates`. */
 const UZS_PER_USD = 12_600
@@ -265,9 +264,11 @@ function build(): ListingDetail[] {
   const now = Date.now()
   return SEEDS.map((seed, i) => {
     const firstSeen = new Date(now - seed.hoursAgo * 3_600_000)
-    const photos = Array.from({ length: seed.photos }, (_, p) => ({
-      large_url: photoDataUri(i, p, 'large'),
-      thumb_url: photoDataUri(i, p, 'thumb'),
+    // No URLs yet: MinIO starts serving real images once the collector runs
+    // (Phase 1). The Photo component draws a placeholder meanwhile.
+    const photos = Array.from({ length: seed.photos }, () => ({
+      large_url: null,
+      thumb_url: null,
       width: 1280,
       height: 960,
     }))
@@ -313,7 +314,7 @@ function build(): ListingDetail[] {
       land_sotix: seed.land ?? null,
       floor: seed.floor,
       floors_total: seed.floors,
-      thumb_url: photoDataUri(i, 0, 'thumb'),
+      thumb_url: null,
       photo_count: seed.photos,
       first_seen_at: firstSeen.toISOString(),
       last_seen_at: new Date(firstSeen.getTime() + 3_600_000).toISOString(),
