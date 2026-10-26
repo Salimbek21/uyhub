@@ -106,3 +106,60 @@ Phase 1 — Data model and collector. Before starting, two items from
 Phase 1 also needs from the human (SPEC 18): a dedicated SIM for the userbot and the
 list of initial test sources. `TG_API_ID` and `TG_API_HASH` were supplied on 2026-10-26
 and are in the local `.env`.
+
+---
+
+## UI prototype (out of phase order) ✅
+
+Completed 2026-10-26, at the product owner's request so the product could be seen and
+reacted to before four more phases of backend work.
+
+### What was built
+
+`miniapp/` — the real Phase 5 project, not a throwaway mock: React 19, TypeScript,
+Vite 7, Tailwind 4, TanStack Query 5, hand-typed Telegram WebApp SDK wrapper.
+
+| Area | Contents |
+|---|---|
+| `src/types.ts` | The API contract, mirroring SPEC 9.2 response shapes |
+| `src/data/client.ts` | **The only file that knows where data comes from.** One function per endpoint, with simulated latency. Phase 4 swaps the bodies for `fetch` and no screen changes |
+| `src/data/listings.ts` | 24 listings written in the style the parser should produce: generated uz titles, cleaned descriptions, canonical districts, USD and UZS prices, 1–3 sources each, two with price drops |
+| `src/telegram.ts` | Theme params, BackButton, MainButton, haptics, `openTelegramLink` — all guarded so the app runs in a plain browser |
+| `src/i18n/` | Uzbek Latin and Russian, with price and relative-time formatting |
+| `src/screens/` | Feed, Detail, Favorites, Saved searches, Settings |
+| `src/components/` | Filter sheet, listing card, swipe gallery, tab bar, skeletons, empty and error states |
+
+Working: quick filter chips, full filter sheet with a live match count on the Apply
+button, infinite scroll, favourites (persisted), saved searches, photo gallery with
+swipe, price-drop indicator, source attribution links, phone reveal behind a separate
+call, uz/ru switching, light and dark themes, 360 px layouts.
+
+### Verified by running it
+
+- `npm run lint`, `npx tsc --noEmit`, `npm run build` all clean; bundle 97 kB gzipped
+- Driven in a 430×932 browser window: feed, language switch, filter sheet
+  (count 13 → 2 on Chilonzor + 3 rooms), detail, phone reveal, empty favourites
+- Console clean — zero errors, zero warnings
+- Dark theme verified by forcing `data-theme="dark"`
+
+### Known gaps
+
+1. **Photos are generated SVG placeholders**, not photographs. Real images arrive with
+   the collector in Phase 1.
+2. **Favourites and saved searches live in `localStorage`**, not on the server. Phase 4
+   moves them to the `favorites` and `saved_searches` tables.
+3. **Not yet opened inside a real Telegram client.** That needs an HTTPS tunnel and a
+   bot from @BotFather (Phase 6 inputs). The SDK integration is written and guarded but
+   only exercised in a browser, so BackButton, MainButton and haptics are untested in
+   situ.
+4. **No deep linking.** Navigation is local state; the `start_param` entry point that
+   opens a specific listing from a bot notification is Phase 5 work.
+5. **No tests.** The prototype is for looking at and reacting to. Phase 5 adds the
+   component and interaction tests, and Lighthouse ≥ 80 per its DoD.
+6. **Russian UI shows Uzbek listing titles** — see `OPEN_QUESTIONS.md` B11.
+
+### How to run it
+
+```bash
+cd miniapp && npm install && npm run dev   # http://127.0.0.1:5173
+```

@@ -35,6 +35,7 @@ Status values: **open**, **resolved** (with the decision recorded in `DECISIONS.
 | B8 | A Mini App session open longer than 24 h has stale `initData`, so every request 401s. | Phase 5 | **open** |
 | B9 | Merge keeps "the most complete text" as `description` — longest, or from the most trusted source? | Phase 3 | **open** |
 | B10 | `large`/`thumb` must be public while `original` stays private, but SPEC puts all three under one prefix. | Phase 0 | **resolved** — DECISIONS 0.6, two buckets |
+| B11 | The parser generates `title_uz` only (SPEC 6.2), so a user on the Russian interface sees Uzbek listing titles next to Russian chrome. Found while running the prototype. | Phase 2 | **open** — options: generate `title_ru` too, compose the title client-side from structured fields, or accept the mix |
 
 ## Risks
 
