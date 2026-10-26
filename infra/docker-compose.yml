@@ -1,0 +1,125 @@
+# Local development infrastructure.
+#
+# Phase 0 runs the data stores only; the application itself runs on the host via
+# `uv run uyhub <service>`. Application containers arrive in Phase 1 together with
+# the Dockerfile, and the production topology lives in docker-compose.prod.yml
+# (Phase 8).
+#
+# Every port is bound to 127.0.0.1 so nothing is reachable from the network.
+#
+# Images are pinned by digest (SPEC section 15, "dependency pinning"). The tag is
+# kept alongside the digest for readability only — Docker resolves the digest. To
+# upgrade, pull the new tag, read its digest with
+#   docker image inspect <image>:<tag> --format '{{index .RepoDigests 0}}'
+# and update both here.
+
+name: uyhub
+
+services:
+  postgres:
+    # PostgreSQL 16.15
+    image: postgres:16-alpine@sha256:cf78e76683b9ca8c5733cbbdce6c9262b45b6767934dd0a95e671f9a0fc20685
+    restart: unless-stopped
+    environment:
+      POSTGRES_USER: ${POSTGRES_USER:-uyhub}
+      POSTGRES_PASSWORD: ${POSTGRES_PASSWORD:?POSTGRES_PASSWORD is required — copy .env.example to .env}
+      POSTGRES_DB: ${POSTGRES_DB:-uyhub}
+      # Deterministic collation so ORDER BY behaves the same everywhere.
+      POSTGRES_INITDB_ARGS: "--locale=C.UTF-8 --encoding=UTF8"
+    ports:
+      - "127.0.0.1:${POSTGRES_HOST_PORT:-15432}:5432"
+    volumes:
+      - postgres_data:/var/lib/postgresql/data
+    healthcheck:
+      test: ["CMD-SHELL", "pg_isready -U ${POSTGRES_USER:-uyhub} -d ${POSTGRES_DB:-uyhub}"]
+      interval: 5s
+      timeout: 5s
+      retries: 12
+      start_period: 10s
+    command:
+      - postgres
+      # Phase 4 seeds 200k listings and asserts p95 < 200 ms; give the planner
+      # enough memory locally that query plans resemble production.
+      - -c
+      - shared_buffers=256MB
+      - -c
+      - work_mem=16MB
+      - -c
+      - max_connections=100
+
+  redis:
+    # Redis 7.4.11
+    image: redis:7-alpine@sha256:ff02b58f971e7d7d156a1267e283fcbbeee91773b6aa36c49dac28ecfe28eadf
+    restart: unless-stopped
+    command:
+      - redis-server
+      - --appendonly
+      - "yes"
+      - --save
+      - "60 1000"
+    ports:
+      - "127.0.0.1:${REDIS_HOST_PORT:-16379}:6379"
+    volumes:
+      - redis_data:/data
+    healthcheck:
+      test: ["CMD", "redis-cli", "ping"]
+      interval: 5s
+      timeout: 3s
+      retries: 12
+      start_period: 5s
+
+  minio:
+    # MinIO RELEASE.2025-09-07T16-13-09Z
+    image: minio/minio@sha256:14cea493d9a34af32f524e538b8346cf79f3321eff8e708c1e2960462bd8936e
+    restart: unless-stopped
+    command: server /data --console-address ":9001"
+    environment:
+      MINIO_ROOT_USER: ${MINIO_ROOT_USER:-uyhub}
+      MINIO_ROOT_PASSWORD: ${MINIO_ROOT_PASSWORD:?MINIO_ROOT_PASSWORD is required — copy .env.example to .env}
+    ports:
+      - "127.0.0.1:${MINIO_HOST_PORT:-19000}:9000"
+      - "127.0.0.1:${MINIO_CONSOLE_HOST_PORT:-19001}:9001"
+    volumes:
+      - minio_data:/data
+    healthcheck:
+      test: ["CMD", "mc", "ready", "local"]
+      interval: 5s
+      timeout: 5s
+      retries: 12
+      start_period: 10s
+
+  # One-shot: create the buckets and make only the derivative bucket readable.
+  #
+  # Behind a profile so `up --wait` ignores it: --wait treats a container that has
+  # exited as a failed start, even on exit code 0. `make up` runs it explicitly
+  # with `compose run --rm` once MinIO is healthy.
+  minio-init:
+    profiles: ["init"]
+    # mc 9.6
+    image: minio/mc@sha256:a7fe349ef4bd8521fb8497f55c6042871b2ae640607cf99d9bede5e9bdf11727
+    depends_on:
+      minio:
+        condition: service_healthy
+    environment:
+      MINIO_ROOT_USER: ${MINIO_ROOT_USER:-uyhub}
+      MINIO_ROOT_PASSWORD: ${MINIO_ROOT_PASSWORD:?MINIO_ROOT_PASSWORD is required}
+      S3_BUCKET_RAW: ${S3_BUCKET_RAW:-uyhub-raw}
+      S3_BUCKET_MEDIA: ${S3_BUCKET_MEDIA:-uyhub-media}
+    entrypoint: ["/bin/sh", "-c"]
+    command:
+      - |
+        set -eu
+        mc alias set local http://minio:9000 "$$MINIO_ROOT_USER" "$$MINIO_ROOT_PASSWORD"
+        mc mb --ignore-existing "local/$$S3_BUCKET_RAW"
+        mc mb --ignore-existing "local/$$S3_BUCKET_MEDIA"
+        # Originals stay private. Derived large/thumb webp are served read-only
+        # through Caddy (SPEC 9.3), so anonymous download is intentional here.
+        mc anonymous set download "local/$$S3_BUCKET_MEDIA"
+        mc anonymous set none "local/$$S3_BUCKET_RAW"
+        echo "buckets ready: $$S3_BUCKET_RAW (private), $$S3_BUCKET_MEDIA (public read)"
+    restart: "no"
+
+volumes:
+  postgres_data:
+  redis_data:
+  minio_data:

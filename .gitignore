@@ -1,0 +1,76 @@
+# ---------------------------------------------------------------------------
+# Secrets — never commit. See CLAUDE.md "Hard safety rules".
+# ---------------------------------------------------------------------------
+.env
+.env.*
+!.env.example
+*.session
+*.session-journal
+secrets/
+*.pem
+*.key
+
+# Backups and dumps (may contain personal data — see SPEC.md section 13)
+backups/
+*.dump
+*.sql.gz
+
+# ---------------------------------------------------------------------------
+# Python
+# ---------------------------------------------------------------------------
+__pycache__/
+*.py[cod]
+*$py.class
+*.so
+.Python
+build/
+develop-eggs/
+dist/
+downloads/
+eggs/
+.eggs/
+sdist/
+wheels/
+*.egg-info/
+.installed.cfg
+*.egg
+
+# Virtual environments
+.venv/
+venv/
+ENV/
+
+# Tooling caches
+.ruff_cache/
+.mypy_cache/
+.dmypy.json
+.pytest_cache/
+.coverage
+.coverage.*
+htmlcov/
+coverage.xml
+.hypothesis/
+
+# ---------------------------------------------------------------------------
+# Node / Mini App (Phase 5)
+# ---------------------------------------------------------------------------
+node_modules/
+miniapp/dist/
+miniapp/.vite/
+npm-debug.log*
+yarn-error.log*
+
+# ---------------------------------------------------------------------------
+# Local data volumes
+# ---------------------------------------------------------------------------
+infra/data/
+.docker-data/
+
+# ---------------------------------------------------------------------------
+# Editors / OS
+# ---------------------------------------------------------------------------
+.DS_Store
+.idea/
+.vscode/
+*.swp
+*~

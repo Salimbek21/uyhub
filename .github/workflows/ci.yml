@@ -1,0 +1,136 @@
+name: CI
+
+on:
+  push:
+    branches: [main]
+  pull_request:
+  workflow_dispatch:
+
+concurrency:
+  group: ci-${{ github.ref }}
+  cancel-in-progress: true
+
+env:
+  # The repository is the Compose project directory; .env is created from the
+  # example so CI exercises exactly the configuration a new developer gets.
+  COMPOSE: docker compose --env-file .env -f infra/docker-compose.yml
+
+jobs:
+  backend:
+    name: Backend — lint, types, tests
+    runs-on: ubuntu-latest
+    timeout-minutes: 20
+
+    steps:
+      - uses: actions/checkout@v5
+
+      - name: Install uv
+        uses: astral-sh/setup-uv@v6
+        with:
+          enable-cache: true
+          cache-dependency-glob: backend/uv.lock
+
+      - name: Install dependencies
+        working-directory: backend
+        # --frozen fails if uv.lock is out of date with pyproject.toml, which
+        # keeps the lockfile honest (SPEC section 15: dependency pinning).
+        run: uv sync --frozen
+
+      - name: Lint and format check
+        working-directory: backend
+        run: |
+          uv run ruff check .
+          uv run ruff format --check .
+
+      - name: Type check (mypy --strict)
+        working-directory: backend
+        run: uv run mypy
+
+      - name: Create .env
+        run: cp .env.example .env
+
+      # Uses the Makefile rather than raw compose so CI exercises the same entry
+      # point developers use, including the one-shot bucket creation.
+      - name: Start infrastructure
+        run: make up
+
+      - name: Apply migrations
+        run: make migrate
+
+      - name: Run tests
+        working-directory: backend
+        run: uv run pytest --cov=uyhub --cov-report=term-missing
+
+      - name: Infrastructure logs on failure
+        if: failure()
+        run: $COMPOSE logs --tail=200
+
+      - name: Stop infrastructure
+        if: always()
+        run: $COMPOSE down -v
+
+  miniapp:
+    name: Mini App — lint and build
+    runs-on: ubuntu-latest
+    timeout-minutes: 15
+    steps:
+      - uses: actions/checkout@v5
+
+      - name: Check whether the Mini App exists yet
+        id: exists
+        run: |
+          if [ -f miniapp/package.json ]; then
+            echo "present=true" >> "$GITHUB_OUTPUT"
+          else
+            echo "present=false" >> "$GITHUB_OUTPUT"
+            echo "miniapp/ not present yet (Phase 5) — nothing to build."
+          fi
+
+      - uses: actions/setup-node@v5
+        if: steps.exists.outputs.present == 'true'
+        with:
+          node-version: '22'
+          cache: npm
+          cache-dependency-path: miniapp/package-lock.json
+
+      - name: Install, lint, type-check and build
+        if: steps.exists.outputs.present == 'true'
+        working-directory: miniapp
+        run: |
+          npm ci
+          npm run lint
+          npx tsc --noEmit
+          npm run build
+
+  audit:
+    name: Dependency audit
+    runs-on: ubuntu-latest
+    timeout-minutes: 10
+    # Report-only for now. Phase 8's security checklist turns this into a gate;
+    # see docs/DECISIONS.md.
+    continue-on-error: true
+    steps:
+      - uses: actions/checkout@v5
+
+      - name: Install uv
+        uses: astral-sh/setup-uv@v6
+        with:
+          enable-cache: true
+          cache-dependency-glob: backend/uv.lock
+
+      - name: Audit Python dependencies
+        working-directory: backend
+        run: |
+          uv export --frozen --no-dev --format requirements.txt > requirements.txt
+          uvx pip-audit --strict --requirement requirements.txt
+
+      - name: Audit Node dependencies
+        run: |
+          if [ -f miniapp/package-lock.json ]; then
+            cd miniapp && npm audit --audit-level=high
+          else
+            echo "miniapp/ not present yet (Phase 5) — nothing to audit."
+          fi
+
+  # Phase 2 adds: parser accuracy evaluation on the golden set in recorded mode,
+  # failing below the thresholds in SPEC section 1.5.

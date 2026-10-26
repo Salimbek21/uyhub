@@ -1,0 +1,59 @@
+# Install once with: uv --directory backend run pre-commit install
+#
+# These hooks are the same checks CI runs, so a push that passes locally passes
+# there too. The secret-related hooks are not optional: CLAUDE.md's hard safety
+# rules say a secret must never reach a commit, and review alone does not catch it.
+
+default_install_hook_types: [pre-commit, commit-msg]
+
+repos:
+  - repo: https://github.com/pre-commit/pre-commit-hooks
+    rev: v6.0.0
+    hooks:
+      - id: trailing-whitespace
+        exclude: '\.md$'
+      - id: end-of-file-fixer
+      - id: check-yaml
+        args: [--allow-multiple-documents]
+      - id: check-toml
+      - id: check-json
+      - id: check-merge-conflict
+      - id: check-case-conflict
+      - id: check-added-large-files
+        args: [--maxkb=512]
+      - id: detect-private-key
+      - id: mixed-line-ending
+        args: [--fix=lf]
+
+  - repo: https://github.com/astral-sh/ruff-pre-commit
+    rev: v0.14.14
+    hooks:
+      - id: ruff-check
+        args: [--fix]
+      - id: ruff-format
+
+  # Scans the whole diff for credentials: API keys, tokens, session strings.
+  - repo: https://github.com/gitleaks/gitleaks
+    rev: v8.30.0
+    hooks:
+      - id: gitleaks
+
+  - repo: local
+    hooks:
+      # mypy must see the project's own dependencies, so it runs in the uv
+      # environment rather than in an isolated pre-commit virtualenv.
+      - id: mypy
+        name: mypy --strict
+        entry: uv --directory backend run mypy
+        language: system
+        types: [python]
+        pass_filenames: false
+        files: ^backend/src/
+
+      # Belt and braces next to .gitignore: refuse the commit outright rather
+      # than relying on the ignore file never being edited by mistake.
+      - id: no-secret-files
+        name: block .env and session files
+        entry: Refusing to commit a secret file (.env, *.session). See CLAUDE.md.
+        language: fail
+        files: '(^|/)\.env($|\.)(?!example)|\.session(-journal)?$'
