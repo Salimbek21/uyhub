@@ -99,9 +99,114 @@ Two rules that already apply:
 
 ## 4. Deployment
 
-TBD — Phase 8. Will be: push a tag, CI builds and pushes the image, deploys over SSH,
-runs migrations, `docker compose up -d`, smoke-tests `/readyz`, and rolls back to the
-previous tag on failure.
+### 4.1 What to buy
+
+**Server.** One VPS in an Uzbek data centre. SPEC section 13 requires personal data —
+which phone numbers are — to be stored on infrastructure physically in Uzbekistan, so
+a cheaper VPS in Europe is not an option for production.
+
+| Stage | Spec | Why |
+|---|---|---|
+| Start / staging | 2 vCPU, 4 GB RAM, 50 GB SSD | Enough for the datastores, API and Mini App while there is no collector traffic |
+| Production | 4 vCPU, 8 GB RAM, 100 GB SSD | SPEC section 16's target; Postgres is given 2 GB and MinIO grows with photos |
+
+Ubuntu LTS, a public IPv4 address, and SSH key access. Ask the provider to confirm the
+data centre is in Uzbekistan, not merely that the company is.
+
+**Domain.** Any TLD works — Telegram only requires HTTPS. A `.uz` domain is sensible
+for an Uzbek product. Register through an accredited local registrar: international
+resellers charge roughly 30× more for the same name.
+
+**DNS.** Three A records, all pointing at the VPS IP. Caddy issues certificates on
+first start, which only works once these resolve:
+
+```
+app.<domain>     A   <vps-ip>
+api.<domain>     A   <vps-ip>
+media.<domain>   A   <vps-ip>
+```
+
+### 4.2 First-time server setup
+
+```bash
+# As root on a fresh Ubuntu LTS box.
+
+# 1. A non-root user for the application
+adduser --disabled-password --gecos "" uyhub
+usermod -aG sudo uyhub
+mkdir -p /home/uyhub/.ssh && cp ~/.ssh/authorized_keys /home/uyhub/.ssh/
+chown -R uyhub:uyhub /home/uyhub/.ssh && chmod 700 /home/uyhub/.ssh
+
+# 2. Docker and the Compose plugin
+curl -fsSL https://get.docker.com | sh
+usermod -aG docker uyhub
+
+# 3. Firewall: SSH and HTTP(S) only. Postgres, Redis and MinIO are never exposed.
+ufw allow OpenSSH && ufw allow 80/tcp && ufw allow 443/tcp && ufw --force enable
+
+# 4. Disable password and root SSH login
+sed -i 's/^#*PasswordAuthentication.*/PasswordAuthentication no/' /etc/ssh/sshd_config
+sed -i 's/^#*PermitRootLogin.*/PermitRootLogin no/' /etc/ssh/sshd_config
+systemctl restart ssh
+```
+
+Then as `uyhub`:
+
+```bash
+sudo mkdir -p /opt/uyhub && sudo chown uyhub:uyhub /opt/uyhub
+git clone <repository-url> /opt/uyhub && cd /opt/uyhub
+
+cp .env.prod.example .env
+chmod 600 .env
+
+# Generate the secrets ON THE SERVER. They are never created on a laptop, never
+# sent over chat, and never committed.
+openssl rand -base64 32    # -> POSTGRES_PASSWORD (also into DATABASE_URL)
+openssl rand -base64 32    # -> MINIO_ROOT_PASSWORD (also into S3_SECRET_KEY)
+
+nano .env                  # fill in DOMAIN, ACME_EMAIL and the two passwords
+```
+
+### 4.3 Deploying
+
+```bash
+cd /opt/uyhub
+./infra/deploy.sh            # current checkout
+./infra/deploy.sh v0.2.0     # a specific tag
+```
+
+The script builds the images, starts the datastores, creates the MinIO buckets, runs
+migrations, starts the API and Caddy, publishes the Mini App bundle, then smoke-tests
+`/readyz`. If the smoke test fails it restores the previous image and restarts. It
+never touches volumes, so data survives every path through it, including rollback.
+
+The first run takes a few extra minutes while Let's Encrypt issues certificates:
+
+```bash
+docker compose -f infra/docker-compose.prod.yml logs -f caddy
+```
+
+### 4.4 Afterwards
+
+```bash
+curl https://api.<domain>/healthz     # {"status":"ok",...}
+curl https://api.<domain>/readyz      # all three dependencies ok
+open https://app.<domain>             # the Mini App
+```
+
+`/metrics` is deliberately unreachable from the internet (SPEC 9.1); Caddy returns 404
+for it. Prometheus scrapes it over the Docker network from Phase 7.
+
+### 4.5 Watch out for
+
+- **Compose drops `env_file` on `run` for a profiled service** unless the profile is
+  named explicitly. `deploy.sh` always passes `--profile`; if you invoke `migrate` or
+  `minio-init` by hand, do the same or the container starts with no configuration at
+  all. See `DECISIONS.md` 8.2.
+- **`caddy_data` holds the TLS certificates.** Deleting that volume forces re-issuance
+  and can hit Let's Encrypt rate limits. `deploy.sh` never removes volumes.
+- **`DATABASE_URL` points at `postgres`, not `localhost`** in production: it is a
+  Docker network hostname, not the host.
 
 ## 5. Rotating secrets
 

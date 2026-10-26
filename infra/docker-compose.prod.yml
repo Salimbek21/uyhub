@@ -1,0 +1,236 @@
+# UyHub production topology (SPEC section 16).
+#
+#   cd /opt/uyhub && docker compose -f infra/docker-compose.prod.yml up -d
+#
+# Normally invoked through infra/deploy.sh, which also runs migrations, smoke
+# tests the result and rolls back on failure.
+#
+# Only Caddy publishes ports. Postgres, Redis and MinIO are reachable solely on
+# the internal Docker network (SPEC section 15).
+
+name: uyhub
+
+x-logging: &logging
+  driver: json-file
+  options:
+    max-size: "10m"
+    max-file: "5"
+
+x-backend: &backend
+  build:
+    context: ../backend
+    dockerfile: Dockerfile
+  image: uyhub-backend:${UYHUB_VERSION:-latest}
+  # The path is a variable so a test run can point at a throwaway file. On the
+  # server this resolves to the single production .env. Without it, the prod
+  # compose silently reads whatever .env happens to be in the repository root —
+  # which on a developer machine is the local one, pointing at localhost.
+  env_file:
+    - "${UYHUB_ENV_FILE:-../.env}"
+  restart: unless-stopped
+  logging: *logging
+  depends_on:
+    postgres: {condition: service_healthy}
+    redis: {condition: service_healthy}
+    minio: {condition: service_healthy}
+
+services:
+  # -------------------------------------------------------------------------
+  # Data stores
+  # -------------------------------------------------------------------------
+  postgres:
+    # PostgreSQL 16.15
+    image: postgres:16-alpine@sha256:cf78e76683b9ca8c5733cbbdce6c9262b45b6767934dd0a95e671f9a0fc20685
+    restart: unless-stopped
+    logging: *logging
+    environment:
+      POSTGRES_USER: ${POSTGRES_USER:?set in .env}
+      POSTGRES_PASSWORD: ${POSTGRES_PASSWORD:?set in .env}
+      POSTGRES_DB: ${POSTGRES_DB:?set in .env}
+      POSTGRES_INITDB_ARGS: "--locale=C.UTF-8 --encoding=UTF8"
+    volumes:
+      - postgres_data:/var/lib/postgresql/data
+      - ./backup:/backup
+    healthcheck:
+      test: ["CMD-SHELL", "pg_isready -U ${POSTGRES_USER} -d ${POSTGRES_DB}"]
+      interval: 10s
+      timeout: 5s
+      retries: 6
+      start_period: 20s
+    deploy:
+      resources:
+        limits: {memory: 2G}
+    command:
+      - postgres
+      - -c
+      - shared_buffers=512MB
+      - -c
+      - work_mem=16MB
+      - -c
+      - max_connections=100
+
+  redis:
+    # Redis 7.4.11
+    image: redis:7-alpine@sha256:ff02b58f971e7d7d156a1267e283fcbbeee91773b6aa36c49dac28ecfe28eadf
+    restart: unless-stopped
+    logging: *logging
+    command:
+      - redis-server
+      - --appendonly
+      - "yes"
+      - --maxmemory
+      - "512mb"
+      # Streams are the message bus; evicting them would silently drop work.
+      # Refusing writes instead surfaces the problem.
+      - --maxmemory-policy
+      - "noeviction"
+    volumes:
+      - redis_data:/data
+    healthcheck:
+      test: ["CMD", "redis-cli", "ping"]
+      interval: 10s
+      timeout: 3s
+      retries: 6
+    deploy:
+      resources:
+        limits: {memory: 768M}
+
+  minio:
+    # MinIO RELEASE.2025-09-07T16-13-09Z
+    image: minio/minio@sha256:14cea493d9a34af32f524e538b8346cf79f3321eff8e708c1e2960462bd8936e
+    restart: unless-stopped
+    logging: *logging
+    command: server /data
+    environment:
+      MINIO_ROOT_USER: ${MINIO_ROOT_USER:?set in .env}
+      MINIO_ROOT_PASSWORD: ${MINIO_ROOT_PASSWORD:?set in .env}
+    volumes:
+      - minio_data:/data
+    healthcheck:
+      test: ["CMD", "mc", "ready", "local"]
+      interval: 10s
+      timeout: 5s
+      retries: 6
+      start_period: 20s
+    deploy:
+      resources:
+        limits: {memory: 1G}
+
+  minio-init:
+    profiles: ["init"]
+    # mc 9.6
+    image: minio/mc@sha256:a7fe349ef4bd8521fb8497f55c6042871b2ae640607cf99d9bede5e9bdf11727
+    depends_on:
+      minio: {condition: service_healthy}
+    environment:
+      MINIO_ROOT_USER: ${MINIO_ROOT_USER:?set in .env}
+      MINIO_ROOT_PASSWORD: ${MINIO_ROOT_PASSWORD:?set in .env}
+      S3_BUCKET_RAW: ${S3_BUCKET_RAW:-uyhub-raw}
+      S3_BUCKET_MEDIA: ${S3_BUCKET_MEDIA:-uyhub-media}
+    entrypoint: ["/bin/sh", "-c"]
+    command:
+      - |
+        set -eu
+        mc alias set local http://minio:9000 "$$MINIO_ROOT_USER" "$$MINIO_ROOT_PASSWORD"
+        mc mb --ignore-existing "local/$$S3_BUCKET_RAW"
+        mc mb --ignore-existing "local/$$S3_BUCKET_MEDIA"
+        mc anonymous set download "local/$$S3_BUCKET_MEDIA"
+        mc anonymous set none "local/$$S3_BUCKET_RAW"
+        echo "buckets ready"
+    restart: "no"
+
+  # -------------------------------------------------------------------------
+  # Application
+  # -------------------------------------------------------------------------
+  api:
+    <<: *backend
+    command: ["api"]
+    deploy:
+      resources:
+        limits: {memory: 768M}
+
+  # Migrations run as a one-shot before the rest starts; deploy.sh invokes it.
+  migrate:
+    <<: *backend
+    profiles: ["tools"]
+    restart: "no"
+    entrypoint: ["alembic"]
+    command: ["upgrade", "head"]
+
+  # Phase 1 onwards. Each is a working entrypoint today but has no real loop yet,
+  # so they are left out of the default set rather than burning a container each.
+  # collector:
+  #   <<: *backend
+  #   command: ["collector"]
+  #   volumes: [backend_data:/data]
+  # parser:
+  #   <<: *backend
+  #   command: ["parser"]
+  #   deploy: {replicas: 2}
+  # bot:
+  #   <<: *backend
+  #   command: ["bot"]
+  # poster:
+  #   <<: *backend
+  #   command: ["poster"]
+  # scheduler:
+  #   <<: *backend
+  #   command: ["scheduler"]
+
+  # -------------------------------------------------------------------------
+  # Mini App — builds, publishes its bundle into the volume Caddy serves, exits
+  # -------------------------------------------------------------------------
+  miniapp:
+    build:
+      context: ../miniapp
+      dockerfile: Dockerfile
+      args:
+        # Becomes live when the Mini App starts calling the real API in Phase 4;
+        # until then it runs on mock data and ignores this.
+        VITE_API_BASE_URL: https://api.${DOMAIN:?set in .env}
+    image: uyhub-miniapp:${UYHUB_VERSION:-latest}
+    restart: "no"
+    logging: *logging
+    volumes:
+      - miniapp_dist:/srv/miniapp
+
+  # -------------------------------------------------------------------------
+  # Edge
+  # -------------------------------------------------------------------------
+  caddy:
+    image: caddy:2-alpine
+    restart: unless-stopped
+    logging: *logging
+    ports:
+      - "80:80"
+      - "443:443"
+      - "443:443/udp"   # HTTP/3
+    environment:
+      DOMAIN: ${DOMAIN:?set in .env}
+      ACME_EMAIL: ${ACME_EMAIL:?set in .env}
+      S3_BUCKET_MEDIA: ${S3_BUCKET_MEDIA:-uyhub-media}
+    volumes:
+      - ./Caddyfile:/etc/caddy/Caddyfile:ro
+      - miniapp_dist:/srv/miniapp:ro
+      - caddy_data:/data      # certificates — losing this re-issues them
+      - caddy_config:/config
+    depends_on:
+      api: {condition: service_started}
+    healthcheck:
+      test: ["CMD", "wget", "--spider", "-q", "http://127.0.0.1:80"]
+      interval: 30s
+      timeout: 5s
+      retries: 3
+      start_period: 15s
+    deploy:
+      resources:
+        limits: {memory: 256M}
+
+volumes:
+  postgres_data:
+  redis_data:
+  minio_data:
+  miniapp_dist:
+  backend_data:
+  caddy_data:
+  caddy_config:

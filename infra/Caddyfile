@@ -1,0 +1,89 @@
+# UyHub reverse proxy.
+#
+# Caddy is the only container that publishes ports (SPEC section 15). It obtains
+# and renews TLS certificates automatically, which Telegram Mini Apps require —
+# they refuse to load over plain HTTP.
+#
+# Hosts:
+#   app.<domain>    the Mini App (static files)
+#   api.<domain>    the FastAPI backend
+#   media.<domain>  read-only image delivery from the public MinIO bucket
+{
+	email {$ACME_EMAIL}
+	# Per-host logs; the JSON encoder matches the application's log format.
+	log {
+		output stderr
+		format json
+	}
+}
+
+(security_headers) {
+	header {
+		Strict-Transport-Security "max-age=31536000; includeSubDomains"
+		X-Content-Type-Options "nosniff"
+		Referrer-Policy "strict-origin-when-cross-origin"
+		# Telegram embeds the Mini App in a WebView, so framing must stay allowed
+		# for Telegram itself. Everything else is denied.
+		Content-Security-Policy "frame-ancestors https://web.telegram.org https://*.telegram.org"
+		-Server
+	}
+}
+
+# ---------------------------------------------------------------------------
+# Mini App
+# ---------------------------------------------------------------------------
+app.{$DOMAIN} {
+	import security_headers
+	root * /srv/miniapp
+	encode zstd gzip
+
+	# Hashed asset filenames are safe to cache forever; index.html must not be,
+	# or a deploy leaves users on the previous bundle.
+	@immutable path /assets/*
+	header @immutable Cache-Control "public, max-age=31536000, immutable"
+	header /index.html Cache-Control "no-cache"
+
+	# Single-page app: unknown paths fall back to index.html.
+	try_files {path} /index.html
+	file_server
+}
+
+# ---------------------------------------------------------------------------
+# API
+# ---------------------------------------------------------------------------
+api.{$DOMAIN} {
+	import security_headers
+
+	# /metrics is internal-only (SPEC 9.1). Prometheus scrapes it over the Docker
+	# network; it must never be reachable from the internet.
+	handle /metrics* {
+		respond 404
+	}
+
+	handle {
+		reverse_proxy api:8000 {
+			health_uri /healthz
+			health_interval 10s
+			health_timeout 3s
+		}
+	}
+}
+
+# ---------------------------------------------------------------------------
+# Media — public read of derived images only
+# ---------------------------------------------------------------------------
+media.{$DOMAIN} {
+	import security_headers
+
+	# Reads only. Writes must go through the application, never this host.
+	@write not method GET HEAD
+	respond @write 405
+
+	# The bucket name is prefixed here rather than exposed in URLs, so object
+	# keys stay stable if the bucket is ever renamed. Originals live in a
+	# separate private bucket that this host cannot reach at all.
+	rewrite * /{$S3_BUCKET_MEDIA}{uri}
+	reverse_proxy minio:9000
+
+	header Cache-Control "public, max-age=2592000"
+}
