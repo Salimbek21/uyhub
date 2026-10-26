@@ -208,6 +208,51 @@ for it. Prometheus scrapes it over the Docker network from Phase 7.
 - **`DATABASE_URL` points at `postgres`, not `localhost`** in production: it is a
   Docker network hostname, not the host.
 
+## 4b. Staging the Mini App on Vercel
+
+A stopgap while there is no VPS. Vercel gives the Mini App a public HTTPS URL in
+minutes, which is the one thing Telegram insists on — it refuses to load a Mini App
+over plain HTTP, so without this it cannot be opened inside Telegram at all.
+
+**Scope, and the line not to cross.** Only the Mini App goes here, and only while it
+runs on mock data. The API, the database and anything touching a phone number must
+live on infrastructure in Uzbekistan (SPEC section 13). Vercel is not. Today the
+front end holds no personal data whatsoever, so nothing is at risk; the moment the
+real API is wired up (Phase 4), production moves to the VPS and Vercel is demoted to
+previewing front-end changes, or dropped.
+
+### Deploying
+
+Vercel needs an account login, which is done by a human, not by tooling or an agent.
+
+```bash
+cd miniapp
+npx vercel login     # opens a browser
+npx vercel --prod    # first run asks a few questions; accept the defaults
+```
+
+`miniapp/vercel.json` already sets the framework, the build command, the SPA
+fallback and the headers, so the prompts can be answered with their defaults.
+
+Importing from GitHub works too. In that case set **Root Directory** to `miniapp` in
+the project settings, or Vercel will try to build the repository root and fail.
+
+### Opening it inside Telegram
+
+1. Message [@BotFather](https://t.me/BotFather) → `/newbot` (a test bot is fine).
+2. `/newapp` → choose the bot → paste the Vercel URL.
+3. Open the resulting `t.me/<bot>/<app>` link on a phone.
+
+Only then are the parts that cannot be checked in a desktop browser actually
+exercised: the native BackButton, haptics, and Telegram's own light/dark theme.
+
+### Why the headers in vercel.json matter
+
+Telegram Web embeds the Mini App in an iframe from `web.telegram.org`. The
+`Content-Security-Policy: frame-ancestors` header allows exactly that, and
+`X-Frame-Options` is deliberately **not** set — it would override the CSP in some
+browsers and the app would render as a blank frame inside Telegram.
+
 ## 5. Rotating secrets
 
 TBD — Phase 7/8. Partial notes that already matter:
