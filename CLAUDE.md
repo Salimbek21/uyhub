@@ -18,7 +18,7 @@ The full product and technical specification is in `docs/SPEC.md`. Read it befor
 
 ## Stack (changes require an entry in DECISIONS.md)
 - Backend: Python 3.12, `uv`, FastAPI, SQLAlchemy 2.0 async + Alembic, Pydantic v2 + pydantic-settings, structlog
-- Data: PostgreSQL 16, Redis 7 (Streams for queues), MinIO (S3-compatible) for photos
+- Data: PostgreSQL 16, Redis 7 (Streams for queues), SeaweedFS (S3-compatible) for photos
 - Telegram: Telethon (userbot collector), aiogram 3 (bot + channel poster)
 - LLM: Anthropic Python SDK, model name from env `LLM_MODEL`
 - Mini App: React + TypeScript + Vite, TanStack Query, Tailwind, Telegram WebApp SDK

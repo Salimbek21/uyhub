@@ -17,8 +17,7 @@ curl -LsSf https://astral.sh/uv/install.sh | sh     # uv
 
 # 2. Configuration
 cp .env.example .env
-# Edit POSTGRES_PASSWORD, MINIO_ROOT_PASSWORD and S3_SECRET_KEY to local values.
-# S3_SECRET_KEY must equal MINIO_ROOT_PASSWORD.
+# Set POSTGRES_PASSWORD and S3_SECRET_KEY to local values.
 chmod 600 .env
 
 # 3. Dependencies, infrastructure, schema
@@ -27,7 +26,7 @@ make up
 make migrate
 
 # 4. Verify
-make check          # probes Postgres, Redis and MinIO from the application
+make check          # probes Postgres, Redis and object storage from the application
 make test
 make lint
 
@@ -50,9 +49,9 @@ an image already in the local cache is used without contacting the registry.
 
 ### Host ports
 
-UyHub publishes **15432** (Postgres), **16379** (Redis), **19000** (MinIO API) and
-**19001** (MinIO console), all on 127.0.0.1, so it can run alongside other local
-stacks. The MinIO console is at <http://localhost:19001>.
+UyHub publishes **15432** (Postgres), **16379** (Redis) and **19000** (the S3 API),
+all on 127.0.0.1, so it can run alongside other local stacks. SeaweedFS has no web
+console; inspect objects with the AWS CLI or `uyhub check`.
 
 ### Everyday commands
 
@@ -73,7 +72,7 @@ stacks. The MinIO console is at <http://localhost:19001>.
 
 ### Resetting local data
 
-`make clean-volumes` deletes the Postgres, Redis and MinIO volumes. It asks for
+`make clean-volumes` deletes the Postgres, Redis and SeaweedFS volumes. It asks for
 confirmation because the data is unrecoverable. `make clean` only removes tool caches
 and touches no data.
 
@@ -191,7 +190,7 @@ a cheaper VPS in Europe is not an option for production.
 | Stage | Spec | Why |
 |---|---|---|
 | Start / staging | 2 vCPU, 4 GB RAM, 50 GB SSD | Enough for the datastores, API and Mini App while there is no collector traffic |
-| Production | 4 vCPU, 8 GB RAM, 100 GB SSD | SPEC section 16's target; Postgres is given 2 GB and MinIO grows with photos |
+| Production | 4 vCPU, 8 GB RAM, 100 GB SSD | SPEC section 16's target; Postgres is given 2 GB and object storage grows with photos |
 
 Ubuntu LTS, a public IPv4 address, and SSH key access. Ask the provider to confirm the
 data centre is in Uzbekistan, not merely that the company is.
@@ -224,7 +223,7 @@ chown -R uyhub:uyhub /home/uyhub/.ssh && chmod 700 /home/uyhub/.ssh
 curl -fsSL https://get.docker.com | sh
 usermod -aG docker uyhub
 
-# 3. Firewall: SSH and HTTP(S) only. Postgres, Redis and MinIO are never exposed.
+# 3. Firewall: SSH and HTTP(S) only. Postgres, Redis and SeaweedFS are never exposed.
 ufw allow OpenSSH && ufw allow 80/tcp && ufw allow 443/tcp && ufw --force enable
 
 # 4. Disable password and root SSH login
@@ -245,7 +244,7 @@ chmod 600 .env
 # Generate the secrets ON THE SERVER. They are never created on a laptop, never
 # sent over chat, and never committed.
 openssl rand -base64 32    # -> POSTGRES_PASSWORD (also into DATABASE_URL)
-openssl rand -base64 32    # -> MINIO_ROOT_PASSWORD (also into S3_SECRET_KEY)
+openssl rand -base64 32    # -> S3_SECRET_KEY
 
 nano .env                  # fill in DOMAIN, ACME_EMAIL and the two passwords
 ```
@@ -258,7 +257,7 @@ cd /opt/uyhub
 ./infra/deploy.sh v0.2.0     # a specific tag
 ```
 
-The script builds the images, starts the datastores, creates the MinIO buckets, runs
+The script builds the images, starts the datastores, creates the buckets, runs
 migrations, starts the API and Caddy, publishes the Mini App bundle, then smoke-tests
 `/readyz`. If the smoke test fails it restores the previous image and restarts. It
 never touches volumes, so data survives every path through it, including rollback.
@@ -284,7 +283,7 @@ for it. Prometheus scrapes it over the Docker network from Phase 7.
 
 - **Compose drops `env_file` on `run` for a profiled service** unless the profile is
   named explicitly. `deploy.sh` always passes `--profile`; if you invoke `migrate` or
-  `minio-init` by hand, do the same or the container starts with no configuration at
+  `init-storage` by hand, do the same or the container starts with no configuration at
   all. See `DECISIONS.md` 8.2.
 - **`caddy_data` holds the TLS certificates.** Deleting that volume forces re-issuance
   and can hit Let's Encrypt rate limits. `deploy.sh` never removes volumes.
@@ -351,7 +350,7 @@ TBD — Phase 7/8. Partial notes that already matter:
 ## 6. Backup and restore
 
 TBD — Phase 7. Nightly encrypted `pg_dump`, 14 daily + 8 weekly, second location in
-Uzbekistan, plus a weekly MinIO mirror. The restore procedure must be tested, not just
+Uzbekistan, plus a weekly object-storage mirror. The restore procedure must be tested, not just
 written: Phase 7's DoD requires restoring into a fresh database and running the API
 against it.
 

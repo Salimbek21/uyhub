@@ -53,7 +53,7 @@ Legend: ✅ done · ⬜ not yet · ➖ not applicable yet
 - ✅ `pip-audit` runs on every PR (report-only — see DECISIONS 0.12)
 - ⬜ `pip-audit` and `npm audit` block the build — Phase 8
 - ⬜ Containers run as non-root with a read-only root filesystem where possible — Phase 8
-- ⬜ Only Caddy exposes ports; Postgres, Redis and MinIO on the internal network — Phase 8
+- ⬜ Only Caddy exposes ports; Postgres, Redis and SeaweedFS on the internal network — Phase 8
 - ⬜ Automatic HTTPS for `app.`, `api.` and `media.` — Phase 8
 - ⬜ MinIO: `uyhub-media` public read, `uyhub-raw` private, verified in production — Phase 8
 - ⬜ Dependabot or equivalent enabled — Phase 8

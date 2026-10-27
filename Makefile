@@ -31,9 +31,9 @@ help: ## Show this help
 ##@ Local stack
 
 .PHONY: up
-up: .require-env ## Start Postgres, Redis and MinIO and wait until healthy
+up: .require-env ## Start Postgres, Redis and SeaweedFS and wait until healthy
 	$(COMPOSE) up -d --wait
-	$(COMPOSE) run --rm minio-init
+	$(RUN) uyhub init-storage
 	@echo "infrastructure ready"
 
 .PHONY: down
@@ -55,8 +55,8 @@ clean: ## Remove build and tool caches (no data is touched)
 	@echo "caches removed"
 
 .PHONY: clean-volumes
-clean-volumes: .require-env ## DESTRUCTIVE: delete database, Redis and MinIO data
-	@echo "This deletes the local Postgres, Redis and MinIO volumes. Data is unrecoverable."
+clean-volumes: .require-env ## DESTRUCTIVE: delete database, Redis and object storage data
+	@echo "This deletes the local Postgres, Redis and SeaweedFS volumes. Data is unrecoverable."
 	@read -r -p "Type 'yes' to continue: " answer && [ "$$answer" = "yes" ] || { echo "aborted"; exit 1; }
 	$(COMPOSE) down -v
 
@@ -113,7 +113,7 @@ test-unit: ## Run only tests with no external dependencies
 	$(RUN) pytest -m unit
 
 .PHONY: test-integration
-test-integration: .require-env ## Run only tests that need Postgres, Redis and MinIO
+test-integration: .require-env ## Run only tests that need Postgres, Redis and object storage
 	$(RUN) pytest -m integration
 
 .PHONY: coverage
@@ -146,11 +146,11 @@ api: .require-env ## Run the API with auto-reload
 	$(RUN) uyhub api --reload
 
 .PHONY: check
-check: .require-env ## Probe Postgres, Redis and MinIO from the application
+check: .require-env ## Probe Postgres, Redis and object storage from the application
 	$(RUN) uyhub check
 
 .PHONY: init-storage
-init-storage: .require-env ## Create the MinIO buckets if missing
+init-storage: .require-env ## Create the object storage buckets if missing
 	$(RUN) uyhub init-storage
 
 .PHONY: collector

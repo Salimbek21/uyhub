@@ -332,6 +332,38 @@ most likely to get a userbot banned.
 collector processes cannot both spend the last slot. `COLLECTOR_MAX_JOINS_PER_DAY`
 is validated at `le=50` so a typo cannot turn 5 into 500.
 
+### 1.0 SeaweedFS replaces MinIO as the object store
+
+**Context.** The first CI run against a real remote failed at `make up`. MinIO has
+withdrawn its community images from every public registry: `minio/minio` returns
+404 from Docker Hub's repository API and 401 from the registry, `quay.io/minio/minio`
+requires authentication, and `dl.min.io` answers 410 Gone for the server and `mc`
+binaries. The only reason the stack still ran here was a 13-month-old local image
+cache. A fresh VPS would have failed exactly as CI did.
+
+**Decision.** SeaweedFS 4.51 (`chrislusf/seaweedfs`, digest-pinned), all-in-one
+`weed server -s3`, S3 API on port 8333. The product owner chose it over pinning
+Bitnami's frozen MinIO archive.
+
+**Consequences.** No application code changed — `core/s3.py` speaks plain S3 through
+aioboto3, and all 193 tests pass against SeaweedFS untouched. Three things did:
+
+- The `minio-init` container is gone. Buckets are now created by `uyhub init-storage`,
+  our own already-tested code, so local, CI and production run the same path.
+- Anonymous read is a static identity in the S3 config rather than a bucket policy
+  applied at runtime. **Without an identity file SeaweedFS grants anonymous full
+  access**, so the config is written at container start from `S3_SECRET_KEY`; a test
+  asserts `uyhub-media` is anonymously readable and `uyhub-raw` is 403.
+- `MINIO_ROOT_USER`/`MINIO_ROOT_PASSWORD` are gone; there is one credential pair,
+  `S3_ACCESS_KEY`/`S3_SECRET_KEY`, which both configures the server and authenticates
+  our client.
+
+One SeaweedFS behaviour bit us and is worth remembering: each bucket becomes its own
+collection and each collection needs a volume, with a default of eight 30 GB volumes.
+The test suite creates a bucket per test and exhausted them, failing with an opaque
+`InternalError` on PutObject. `-master.volumeSizeLimitMB=1024 -volume.max=0` bounds
+the volume count by disk instead.
+
 ### 1.6 `sources` gets its own CLI sub-command group
 
 **Context.** Phase 0's CLI is a flat list of commands. Source management needs

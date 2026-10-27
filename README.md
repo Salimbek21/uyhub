@@ -23,7 +23,7 @@ Requirements: Docker with the Compose plugin, [uv](https://docs.astral.sh/uv/), 
 
 ```bash
 cp .env.example .env     # then edit the values that matter for your machine
-make up                  # Postgres, Redis, MinIO
+make up                  # Postgres, Redis, SeaweedFS
 make migrate             # apply Alembic migrations
 make test                # unit + integration tests
 make lint                # ruff, mypy --strict (+ frontend from Phase 5)

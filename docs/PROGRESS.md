@@ -208,7 +208,7 @@ dead-letter path to `stream:dead`.
 | `types.py` | `IncomingMessage`, `IncomingMedia`, `DeletedMessages`, `ResolvedChat` — plain dataclasses, no Telethon |
 | `gateway.py` | The only module importing Telethon. `TelegramGateway` Protocol + `TelethonGateway`; album folding; media description |
 | `client.py` | Client construction from settings; warns if the session file is group- or world-readable |
-| `ingest.py` | `MessageIngestor` — upsert into `raw_messages`, photos to MinIO, publish to `stream:raw`, mark deletions |
+| `ingest.py` | `MessageIngestor` — upsert into `raw_messages`, photos to object storage, publish to `stream:raw`, mark deletions |
 | `media.py` | `PhotoStore` Protocol + `S3PhotoStore`; keys are `raw/{source_id}/{tg_message_id}/{n}.jpg` |
 | `sources.py` | Reference parsing (`@name`, `t.me/...`, invite links), CRUD, the active-chat map, the high-water mark |
 | `accounts.py` | Phone masking, the daily join budget under `FOR UPDATE`, flood-wait state |
@@ -230,9 +230,15 @@ registers the account keeping only the last four digits of the phone.
 (one replica, `backend_data` volume for the session). `deploy.sh` starts it only
 when a session file exists and prints what to do when it does not.
 
+**Object storage moved from MinIO to SeaweedFS.** The first CI run — the first ever,
+since Phase 0 had no remote — failed at `make up`: MinIO has withdrawn its community
+images from Docker Hub, quay.io and `dl.min.io`, and the stack only still worked here
+because of a 13-month-old local image cache. SeaweedFS 4.51 replaced it with no
+application code change; see DECISIONS 1.0. This also closes Phase 0's known gap 1.
+
 ### Verified
 
-- `make test` — **193 passed** (was 78)
+- `make test` — **193 passed** (was 78), against SeaweedFS
 - `make lint` — ruff, `mypy --strict`, eslint, tsc all clean
 - `alembic upgrade head` → `downgrade 0001` → `upgrade head` round-trips
 - `uyhub sources add/list` driven against the real local database

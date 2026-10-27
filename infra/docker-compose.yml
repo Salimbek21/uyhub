@@ -1,9 +1,11 @@
 # Local development infrastructure.
 #
-# Phase 0 runs the data stores only; the application itself runs on the host via
-# `uv run uyhub <service>`. Application containers arrive in Phase 1 together with
-# the Dockerfile, and the production topology lives in docker-compose.prod.yml
-# (Phase 8).
+# The data stores only; the application itself runs on the host via
+# `uv run uyhub <service>`. The production topology lives in
+# docker-compose.prod.yml.
+#
+# Buckets are created by `uyhub init-storage` (see `make up`) rather than by an
+# init container, so the same code path runs locally, in CI and in production.
 #
 # Every port is bound to 127.0.0.1 so nothing is reachable from the network.
 #
@@ -68,58 +70,62 @@ services:
       retries: 12
       start_period: 5s
 
-  minio:
-    # MinIO RELEASE.2025-09-07T16-13-09Z
-    image: minio/minio@sha256:14cea493d9a34af32f524e538b8346cf79f3321eff8e708c1e2960462bd8936e
+  # SeaweedFS all-in-one (master + volume + filer + S3 gateway) on port 8333.
+  # It replaced MinIO in October 2026 when MinIO withdrew its community images
+  # from every public registry; see docs/DECISIONS.md.
+  #
+  # The S3 identity file is written at startup from the environment rather than
+  # committed, because it holds the secret key. Without a config file SeaweedFS
+  # grants anonymous full access, so this is load-bearing, not convenience.
+  #
+  # Each bucket becomes its own SeaweedFS collection, and each collection needs a
+  # volume. The default is eight 30 GB volumes, which the test suite exhausts
+  # because it makes a bucket per test. Smaller volumes with no count limit
+  # (auto-sized from free disk) fixes that and costs nothing in production.
+  seaweedfs:
+    # SeaweedFS 4.51
+    image: chrislusf/seaweedfs@sha256:f7a49e3f3972ebed5be2ed4befa4a0c68eb7bdddba6e692d42729ceb545134b8
     restart: unless-stopped
-    command: server /data --console-address ":9001"
     environment:
-      MINIO_ROOT_USER: ${MINIO_ROOT_USER:-uyhub}
-      MINIO_ROOT_PASSWORD: ${MINIO_ROOT_PASSWORD:?MINIO_ROOT_PASSWORD is required — copy .env.example to .env}
+      S3_ACCESS_KEY: ${S3_ACCESS_KEY:-uyhub}
+      S3_SECRET_KEY: ${S3_SECRET_KEY:?S3_SECRET_KEY is required — copy .env.example to .env}
+      S3_BUCKET_MEDIA: ${S3_BUCKET_MEDIA:-uyhub-media}
     ports:
-      - "127.0.0.1:${MINIO_HOST_PORT:-19000}:9000"
-      - "127.0.0.1:${MINIO_CONSOLE_HOST_PORT:-19001}:9001"
+      - "127.0.0.1:${S3_HOST_PORT:-19000}:8333"
     volumes:
-      - minio_data:/data
+      - seaweedfs_data:/data
+    entrypoint: ["/bin/sh", "-c"]
+    command:
+      - |
+        set -eu
+        umask 077
+        cat > /etc/seaweedfs/s3.json <<JSON
+        {
+          "identities": [
+            {
+              "name": "anonymous",
+              "actions": ["Read:$$S3_BUCKET_MEDIA"]
+            },
+            {
+              "name": "uyhub",
+              "credentials": [
+                {"accessKey": "$$S3_ACCESS_KEY", "secretKey": "$$S3_SECRET_KEY"}
+              ],
+              "actions": ["Admin", "Read", "Write", "List", "Tagging"]
+            }
+          ]
+        }
+        JSON
+        exec weed server -dir=/data -s3 -s3.config=/etc/seaweedfs/s3.json -ip=0.0.0.0 \
+          -master.volumeSizeLimitMB=1024 -volume.max=0
     healthcheck:
-      test: ["CMD", "mc", "ready", "local"]
+      test: ["CMD", "wget", "-qO-", "http://127.0.0.1:8333/status"]
       interval: 5s
       timeout: 5s
       retries: 12
       start_period: 10s
 
-  # One-shot: create the buckets and make only the derivative bucket readable.
-  #
-  # Behind a profile so `up --wait` ignores it: --wait treats a container that has
-  # exited as a failed start, even on exit code 0. `make up` runs it explicitly
-  # with `compose run --rm` once MinIO is healthy.
-  minio-init:
-    profiles: ["init"]
-    # mc 9.6
-    image: minio/mc@sha256:a7fe349ef4bd8521fb8497f55c6042871b2ae640607cf99d9bede5e9bdf11727
-    depends_on:
-      minio:
-        condition: service_healthy
-    environment:
-      MINIO_ROOT_USER: ${MINIO_ROOT_USER:-uyhub}
-      MINIO_ROOT_PASSWORD: ${MINIO_ROOT_PASSWORD:?MINIO_ROOT_PASSWORD is required}
-      S3_BUCKET_RAW: ${S3_BUCKET_RAW:-uyhub-raw}
-      S3_BUCKET_MEDIA: ${S3_BUCKET_MEDIA:-uyhub-media}
-    entrypoint: ["/bin/sh", "-c"]
-    command:
-      - |
-        set -eu
-        mc alias set local http://minio:9000 "$$MINIO_ROOT_USER" "$$MINIO_ROOT_PASSWORD"
-        mc mb --ignore-existing "local/$$S3_BUCKET_RAW"
-        mc mb --ignore-existing "local/$$S3_BUCKET_MEDIA"
-        # Originals stay private. Derived large/thumb webp are served read-only
-        # through Caddy (SPEC 9.3), so anonymous download is intentional here.
-        mc anonymous set download "local/$$S3_BUCKET_MEDIA"
-        mc anonymous set none "local/$$S3_BUCKET_RAW"
-        echo "buckets ready: $$S3_BUCKET_RAW (private), $$S3_BUCKET_MEDIA (public read)"
-    restart: "no"
-
 volumes:
   postgres_data:
   redis_data:
-  minio_data:
+  seaweedfs_data:

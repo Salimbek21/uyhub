@@ -5,7 +5,7 @@
 # Normally invoked through infra/deploy.sh, which also runs migrations, smoke
 # tests the result and rolls back on failure.
 #
-# Only Caddy publishes ports. Postgres, Redis and MinIO are reachable solely on
+# Only Caddy publishes ports. Postgres, Redis and SeaweedFS are reachable solely on
 # the internal Docker network (SPEC section 15).
 
 name: uyhub
@@ -32,7 +32,7 @@ x-backend: &backend
   depends_on:
     postgres: {condition: service_healthy}
     redis: {condition: service_healthy}
-    minio: {condition: service_healthy}
+    seaweedfs: {condition: service_healthy}
 
 services:
   # -------------------------------------------------------------------------
@@ -95,19 +95,52 @@ services:
       resources:
         limits: {memory: 768M}
 
-  minio:
-    # MinIO RELEASE.2025-09-07T16-13-09Z
-    image: minio/minio@sha256:14cea493d9a34af32f524e538b8346cf79f3321eff8e708c1e2960462bd8936e
+  # Object storage. SeaweedFS all-in-one, S3 API on 8333, never published.
+  # It replaced MinIO when MinIO withdrew its community images from every public
+  # registry; see docs/DECISIONS.md.
+  seaweedfs:
+    # SeaweedFS 4.51
+    image: chrislusf/seaweedfs@sha256:f7a49e3f3972ebed5be2ed4befa4a0c68eb7bdddba6e692d42729ceb545134b8
     restart: unless-stopped
     logging: *logging
-    command: server /data
     environment:
-      MINIO_ROOT_USER: ${MINIO_ROOT_USER:?set in .env}
-      MINIO_ROOT_PASSWORD: ${MINIO_ROOT_PASSWORD:?set in .env}
+      S3_ACCESS_KEY: ${S3_ACCESS_KEY:?set in .env}
+      S3_SECRET_KEY: ${S3_SECRET_KEY:?set in .env}
+      S3_BUCKET_MEDIA: ${S3_BUCKET_MEDIA:-uyhub-media}
     volumes:
-      - minio_data:/data
+      - seaweedfs_data:/data
+    # Written at startup, not committed: it holds the secret key. Without an
+    # identity file SeaweedFS grants anonymous full access, so this is the only
+    # thing keeping the untouched originals in uyhub-raw private.
+    #
+    # 1 GB volumes with no count limit: the volume count is then bounded by disk
+    # rather than by the default eight, so storage grows with the disk.
+    entrypoint: ["/bin/sh", "-c"]
+    command:
+      - |
+        set -eu
+        umask 077
+        cat > /etc/seaweedfs/s3.json <<JSON
+        {
+          "identities": [
+            {
+              "name": "anonymous",
+              "actions": ["Read:$$S3_BUCKET_MEDIA"]
+            },
+            {
+              "name": "uyhub",
+              "credentials": [
+                {"accessKey": "$$S3_ACCESS_KEY", "secretKey": "$$S3_SECRET_KEY"}
+              ],
+              "actions": ["Admin", "Read", "Write", "List", "Tagging"]
+            }
+          ]
+        }
+        JSON
+        exec weed server -dir=/data -s3 -s3.config=/etc/seaweedfs/s3.json -ip=0.0.0.0 \
+          -master.volumeSizeLimitMB=1024 -volume.max=0
     healthcheck:
-      test: ["CMD", "mc", "ready", "local"]
+      test: ["CMD", "wget", "-qO-", "http://127.0.0.1:8333/status"]
       interval: 10s
       timeout: 5s
       retries: 6
@@ -116,28 +149,12 @@ services:
       resources:
         limits: {memory: 1G}
 
-  minio-init:
+  # Buckets are created by our own code so the same path runs everywhere.
+  init-storage:
+    <<: *backend
     profiles: ["init"]
-    # mc 9.6
-    image: minio/mc@sha256:a7fe349ef4bd8521fb8497f55c6042871b2ae640607cf99d9bede5e9bdf11727
-    depends_on:
-      minio: {condition: service_healthy}
-    environment:
-      MINIO_ROOT_USER: ${MINIO_ROOT_USER:?set in .env}
-      MINIO_ROOT_PASSWORD: ${MINIO_ROOT_PASSWORD:?set in .env}
-      S3_BUCKET_RAW: ${S3_BUCKET_RAW:-uyhub-raw}
-      S3_BUCKET_MEDIA: ${S3_BUCKET_MEDIA:-uyhub-media}
-    entrypoint: ["/bin/sh", "-c"]
-    command:
-      - |
-        set -eu
-        mc alias set local http://minio:9000 "$$MINIO_ROOT_USER" "$$MINIO_ROOT_PASSWORD"
-        mc mb --ignore-existing "local/$$S3_BUCKET_RAW"
-        mc mb --ignore-existing "local/$$S3_BUCKET_MEDIA"
-        mc anonymous set download "local/$$S3_BUCKET_MEDIA"
-        mc anonymous set none "local/$$S3_BUCKET_RAW"
-        echo "buckets ready"
     restart: "no"
+    command: ["init-storage"]
 
   # -------------------------------------------------------------------------
   # Application
@@ -237,7 +254,7 @@ services:
 volumes:
   postgres_data:
   redis_data:
-  minio_data:
+  seaweedfs_data:
   miniapp_dist:
   backend_data:
   caddy_data:

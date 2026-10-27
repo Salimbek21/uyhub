@@ -7,7 +7,7 @@
 # Hosts:
 #   app.<domain>    the Mini App (static files)
 #   api.<domain>    the FastAPI backend
-#   media.<domain>  read-only image delivery from the public MinIO bucket
+#   media.<domain>  read-only image delivery from the public object-storage bucket
 {
 	email {$ACME_EMAIL}
 	# Per-host logs; the JSON encoder matches the application's log format.
@@ -83,7 +83,7 @@ media.{$DOMAIN} {
 	# keys stay stable if the bucket is ever renamed. Originals live in a
 	# separate private bucket that this host cannot reach at all.
 	rewrite * /{$S3_BUCKET_MEDIA}{uri}
-	reverse_proxy minio:9000
+	reverse_proxy seaweedfs:8333
 
 	header Cache-Control "public, max-age=2592000"
 }

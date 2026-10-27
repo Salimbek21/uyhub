@@ -10,7 +10,7 @@ Phases 1–7.
 
 | Data | Source | Why | Where |
 |---|---|---|---|
-| Listing text and photos | Public Telegram groups and channels | To show the listing | `raw_messages`, `listings`, MinIO |
+| Listing text and photos | Public Telegram groups and channels | To show the listing | `raw_messages`, `listings`, object storage |
 | Seller phone numbers | Inside those public posts | So a buyer can contact the seller | `listings.phones` (plaintext, required for contact reveal) and `listings.phone_hashes` (HMAC) |
 | Telegram user id, language, settings | The user's own use of the bot and Mini App | Favourites, saved searches, notifications | `users`, `favorites`, `saved_searches` |
 | Contact reveals | Button presses in the Mini App | Audit and abuse detection | `contact_reveals` |
@@ -22,7 +22,7 @@ because of that.
 
 These are derived from SPEC 13 and are enforced in code, not by convention:
 
-1. **Storage location.** Production Postgres, Redis and MinIO run on infrastructure
+1. **Storage location.** Production Postgres, Redis and SeaweedFS run on infrastructure
    physically in Uzbekistan. No foreign managed database in production.
 2. **Minimal plaintext.** Phone numbers exist in plaintext only in `listings.phones`.
    Every other reference is an HMAC-SHA256 hash keyed by `PHONE_HASH_KEY`.

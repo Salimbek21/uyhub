@@ -41,8 +41,16 @@ die()  { printf '\033[1;31merror:\033[0m %s\n' "$*" >&2; exit 1; }
 perms=$(stat -c '%a' .env 2>/dev/null || stat -f '%OLp' .env)
 [[ "$perms" == "600" ]] || warn ".env is mode $perms; it should be 600. Run: chmod 600 .env"
 
-for required in DOMAIN ACME_EMAIL POSTGRES_PASSWORD MINIO_ROOT_PASSWORD; do
+for required in DOMAIN ACME_EMAIL POSTGRES_PASSWORD DATABASE_URL S3_SECRET_KEY TG_API_ID TG_API_HASH; do
     grep -qE "^${required}=.+" .env || die "$required is not set in .env"
+done
+
+# A filled-in-looking .env that still carries an example placeholder fails much
+# later, at the smoke test, with a confusing error. Catch it here instead.
+for placeholder in THE_SAME_PASSWORD example.uz replace-with-your; do
+    if grep -q "$placeholder" .env; then
+        die ".env still contains the placeholder '$placeholder'. Fill it in first."
+    fi
 done
 
 command -v docker >/dev/null || die "docker is not installed"
@@ -98,10 +106,10 @@ docker tag "uyhub-backend:${UYHUB_VERSION}" uyhub-backend:latest
 # Data stores first, then migrations, then the application
 # ---------------------------------------------------------------------------
 log "Starting data stores"
-"${COMPOSE[@]}" up -d --wait postgres redis minio
+"${COMPOSE[@]}" up -d --wait postgres redis seaweedfs
 
 log "Ensuring object storage buckets"
-"${COMPOSE_INIT[@]}" run --rm minio-init
+"${COMPOSE_INIT[@]}" run --rm init-storage
 
 log "Applying database migrations"
 if ! "${COMPOSE_TOOLS[@]}" run --rm migrate; then
