@@ -121,7 +121,11 @@ jobs:
       - name: Audit Python dependencies
         working-directory: backend
         run: |
-          uv export --frozen --no-dev --format requirements.txt > requirements.txt
+          # --no-emit-project: without it the export lists uyhub itself as an
+          # editable requirement, which pip-audit cannot install under hash
+          # checking, and the job fails on tooling rather than on a finding.
+          uv export --frozen --no-dev --no-emit-project --format requirements.txt \
+            > requirements.txt
           uvx pip-audit --strict --requirement requirements.txt
 
       - name: Audit Node dependencies

@@ -77,14 +77,14 @@ Full instructions, including the TLS-proxy and port notes, are in `RUNBOOK.md`.
 | `make up` brings up healthy infrastructure | ✅ all three containers healthy, buckets created |
 | `make test` passes locally | ✅ 78 passed |
 | `make lint` passes locally | ✅ ruff + `mypy --strict` clean |
-| `make test` and `make lint` pass **in CI** | ⚠️ **not verified** — no git remote yet, so the workflow has never executed |
+| `make test` and `make lint` pass **in CI** | ✅ since 2026-10-27 — see the Phase 1 entry; the first run failed exactly as gap 1 below predicted |
 
 ### Known gaps
 
-1. **CI is unverified.** `.github/workflows/ci.yml` is written but has never run. It
-   needs a remote and one push. Two specific risks: the digest-pinned MinIO images may
-   not be pullable from GitHub's network (they could not be pulled from this one), and
-   `astral-sh/setup-uv@v6` / `actions/checkout@v5` major versions are unconfirmed.
+1. ~~**CI is unverified.**~~ **Closed 2026-10-27.** The prediction was right: the first
+   run failed on the MinIO images, though for a worse reason than a blocked network —
+   MinIO had withdrawn them everywhere. SeaweedFS replaced it (DECISIONS 1.0). The
+   action versions turned out to be fine.
 2. **No application container.** Phase 0 runs the app on the host; the `Dockerfile`
    arrives in Phase 1 with the first real service.
 3. **No tables.** The data model is Phase 1. The baseline migration is empty by design.
