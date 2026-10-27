@@ -111,6 +111,18 @@ fi
 log "Starting application and edge"
 "${COMPOSE[@]}" up -d --wait api caddy
 
+# The collector needs a Telethon session, and only a human can create one. On a
+# server that has never had `make login-userbot` run, starting it would just
+# crash-loop, so it is skipped with a clear message instead.
+if "${COMPOSE[@]}" run --rm --entrypoint sh -T collector \
+        -c 'test -f "${TG_SESSION_PATH:-/data/sessions/uyhub.session}"' >/dev/null 2>&1; then
+    log "Starting the collector"
+    "${COMPOSE[@]}" up -d collector
+else
+    warn "No Telethon session found — the collector is not being started."
+    warn "Run 'make login-userbot' on this server, then './infra/deploy.sh' again."
+fi
+
 log "Publishing the Mini App bundle"
 "${COMPOSE[@]}" run --rm miniapp
 

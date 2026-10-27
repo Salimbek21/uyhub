@@ -9,6 +9,9 @@ from uyhub.core.config import Settings, get_settings
 
 pytestmark = pytest.mark.unit
 
+FAKE_API_HASH = "replace-with-your-32-char-hash"
+"""Deliberately words rather than realistic hex, so the gitleaks hook stays armed."""
+
 
 def test_defaults_are_local(monkeypatch: pytest.MonkeyPatch) -> None:
     monkeypatch.delenv("APP_ENV", raising=False)
@@ -55,6 +58,49 @@ def test_api_port_must_be_a_valid_port(monkeypatch: pytest.MonkeyPatch) -> None:
     monkeypatch.setenv("API_PORT", "70000")
     with pytest.raises(ValidationError):
         Settings(_env_file=None)  # type: ignore[call-arg]
+
+
+class TestCollectorSettings:
+    """Phase 1 settings. The defaults must let everything else run without them."""
+
+    def test_absent_credentials_are_not_an_error(self, monkeypatch: pytest.MonkeyPatch) -> None:
+        monkeypatch.delenv("TG_API_ID", raising=False)
+        monkeypatch.delenv("TG_API_HASH", raising=False)
+        settings = Settings(_env_file=None)  # type: ignore[call-arg]
+        assert settings.has_telegram_credentials is False
+
+    def test_both_credentials_are_required(self, monkeypatch: pytest.MonkeyPatch) -> None:
+        monkeypatch.setenv("TG_API_ID", "1234567")
+        monkeypatch.delenv("TG_API_HASH", raising=False)
+        assert Settings(_env_file=None).has_telegram_credentials is False  # type: ignore[call-arg]
+
+        monkeypatch.setenv("TG_API_HASH", FAKE_API_HASH)
+        assert Settings(_env_file=None).has_telegram_credentials is True  # type: ignore[call-arg]
+
+    def test_api_hash_is_a_secret(self, monkeypatch: pytest.MonkeyPatch) -> None:
+        """It must not turn up in a traceback or a log line (CLAUDE.md)."""
+        monkeypatch.setenv("TG_API_HASH", FAKE_API_HASH)
+        settings = Settings(_env_file=None)  # type: ignore[call-arg]
+        assert "0123456789abcdef" not in repr(settings)
+        assert settings.tg_api_hash.get_secret_value() == FAKE_API_HASH
+
+    def test_join_budget_defaults_are_conservative(self, monkeypatch: pytest.MonkeyPatch) -> None:
+        monkeypatch.delenv("COLLECTOR_MAX_JOINS_PER_DAY", raising=False)
+        monkeypatch.delenv("COLLECTOR_BACKFILL_DAYS", raising=False)
+        settings = Settings(_env_file=None)  # type: ignore[call-arg]
+        assert settings.collector_max_joins_per_day == 5
+        assert settings.collector_backfill_days == 7
+
+    def test_an_absurd_join_budget_is_rejected(self, monkeypatch: pytest.MonkeyPatch) -> None:
+        """A typo here is how an account gets banned."""
+        monkeypatch.setenv("COLLECTOR_MAX_JOINS_PER_DAY", "500")
+        with pytest.raises(ValidationError):
+            Settings(_env_file=None)  # type: ignore[call-arg]
+
+    def test_session_path_is_a_path(self, monkeypatch: pytest.MonkeyPatch) -> None:
+        monkeypatch.setenv("TG_SESSION_PATH", "/data/sessions/uyhub.session")
+        settings = Settings(_env_file=None)  # type: ignore[call-arg]
+        assert settings.tg_session_path.name == "uyhub.session"
 
 
 class TestSafeUrls:

@@ -165,3 +165,118 @@ call, uz/ru switching, light and dark themes, 360 px layouts.
 ```bash
 cd miniapp && npm install && npm run dev   # http://127.0.0.1:5173
 ```
+
+---
+
+## Phase 1 — Data model and collector ✅
+
+Completed 2026-10-27.
+
+Four product decisions were taken before starting and are recorded in
+`DECISIONS.md` under "Product direction": build a vertical slice to production
+first (P.1), never store or serve phone numbers in plaintext (P.2), curate the
+first thirty sources by priority (P.3), ship the parser regex-first (P.4). P.2
+and P.3 close OPEN_QUESTIONS C1, C2 and A3.
+
+### What was built
+
+**Data model.** All fourteen tables from SPEC section 3, as five modules:
+`models/telegram.py` (tg_accounts, sources, raw_messages), `models/listing.py`
+(listings, listing_sources, listing_photos, price_history), `models/user.py`
+(users, favorites, saved_searches, notification_log), `models/ops.py`
+(suppressed_phones, llm_calls, exchange_rates), plus `models/enums.py` and the
+`IdMixin` / `UuidMixin` / `enum_column` helpers in `models/base.py`.
+
+Two deliberate departures from SPEC 3, both from P.2: there is no
+`contact_reveals` table and `listings` has no plaintext `phones` column, only
+`phone_hashes`. One addition: `sources.priority` for P.3.
+
+**Migration `0002`** creates all of it, including the indexes the rest of the
+system depends on — `(status, deal_type, district, rooms, price_usd)`,
+`(status, first_seen_at DESC)`, GIN on `phone_hashes`, trigram GIN on `title`
+and `landmark`, and `(status, priority)` for the join worker. `alembic check`
+passes, so models and migration cannot drift apart silently.
+
+**Redis Streams** (`core/streams.py`): publish with `MAXLEN ~` trimming,
+consumer groups, `XAUTOCLAIM` for messages stranded by a dead consumer, and a
+dead-letter path to `stream:dead`.
+
+**Collector** (`collector/`, nine modules):
+
+| Module | Contents |
+|---|---|
+| `types.py` | `IncomingMessage`, `IncomingMedia`, `DeletedMessages`, `ResolvedChat` — plain dataclasses, no Telethon |
+| `gateway.py` | The only module importing Telethon. `TelegramGateway` Protocol + `TelethonGateway`; album folding; media description |
+| `client.py` | Client construction from settings; warns if the session file is group- or world-readable |
+| `ingest.py` | `MessageIngestor` — upsert into `raw_messages`, photos to MinIO, publish to `stream:raw`, mark deletions |
+| `media.py` | `PhotoStore` Protocol + `S3PhotoStore`; keys are `raw/{source_id}/{tg_message_id}/{n}.jpg` |
+| `sources.py` | Reference parsing (`@name`, `t.me/...`, invite links), CRUD, the active-chat map, the high-water mark |
+| `accounts.py` | Phone masking, the daily join budget under `FOR UPDATE`, flood-wait state |
+| `joiner.py` | `JoinWorker` — priority order, budget, 10–40 minute jitter, join → backfill → active |
+| `backfill.py` | Gap recovery (forward from `last_message_id`) and first-join history (last `COLLECTOR_BACKFILL_DAYS` days) |
+| `heartbeat.py` | `collector:heartbeat:{account_id}`, 30 s interval, 90 s TTL |
+| `runner.py` | `SourceRegistry` (pub/sub + 60 s fallback), event routing, bounded concurrency, flood-wait handling, drain on SIGTERM |
+| `bootstrap.py` | Assembles the above from `Settings` |
+
+**CLI.** `uyhub collector` runs the real loop. New `uyhub sources
+add|list|pause|resume|remove` group; every change publishes `sources:changed` so
+a running collector reloads without a restart.
+
+**Operator script.** `backend/scripts/login_userbot.py` behind `make
+login-userbot` — interactive, human-only, writes the session at 0600 and
+registers the account keeping only the last four digits of the phone.
+
+**Production.** The `collector` service is live in `docker-compose.prod.yml`
+(one replica, `backend_data` volume for the session). `deploy.sh` starts it only
+when a session file exists and prints what to do when it does not.
+
+### Verified
+
+- `make test` — **193 passed** (was 78)
+- `make lint` — ruff, `mypy --strict`, eslint, tsc all clean
+- `alembic upgrade head` → `downgrade 0001` → `upgrade head` round-trips
+- `uyhub sources add/list` driven against the real local database
+
+New tests, 115 of them, concentrated where the DoD asks:
+
+| Area | Covers |
+|---|---|
+| `unit/test_collector_gateway.py` | Album folding incl. caption not on the first message and out-of-order ids; adjacent albums not merged; media classification; emptiness; `out`; invite-hash parsing; that `raw` carries no sender details |
+| `unit/test_collector_sources.py` | Every reference form, and that `t.me/joinchat/x` is not read as a username |
+| `unit/test_config.py` | Phase 1 settings, `TG_API_HASH` absent from `repr`, join budget bounds |
+| `integration/test_collector_ingest.py` | New messages, albums, the 10-photo cap, undownloadable photos, videos, edits resetting `parsed` → `pending`, redelivery staying silent, deletions, gap recovery not duplicating, first-join backfill bounded by age |
+| `integration/test_collector_joiner.py` | Priority order, budget exhaustion and daily reset, `FloodWaitError` parking the account, `ChannelPrivateError` parking the source, backfill on join |
+| `integration/test_collector_runner.py` | Registry filtering, newly activated sources, deletion with no chat id, a failing ingest not killing the service, drain finishing in-flight work |
+| `integration/test_streams.py` | Groups, pending, ack, `XAUTOCLAIM`, dead-letter |
+| `integration/test_schema.py` | Every table present, `contact_reveals` absent, no `phones` column, each required index and its access method |
+
+Two bugs were found by these tests rather than in review: `sa.Enum(native_enum=False)`
+does **not** create a `CHECK` constraint without `create_constraint=True`, so
+every enum column was an unchecked `VARCHAR`; and the `db_session` fixture needed
+`join_transaction_mode="create_savepoint"` before a test could provoke an
+`IntegrityError` without breaking the fixture's own transaction.
+
+### Known gaps
+
+1. **Never run against real Telegram.** No SIM has been logged in yet, so the
+   DoD's manual check — post in a test source, see it in `raw_messages` within
+   5 s — is outstanding. This is the next thing that needs the product owner
+   (OPEN_QUESTIONS A8 accepted this split).
+2. **`raw_messages` is written but nothing reads it.** The parser is Phase 2;
+   `stream:raw` accumulates until then, bounded by `MAXLEN ~ 100000`.
+3. **One account only.** The schema and the budget logic are per account, and
+   `sources.account_id` exists, but a second account has never been exercised
+   (OPEN_QUESTIONS C3).
+4. **No collector metrics.** Prometheus counters are Phase 7; today the signals
+   are the heartbeat key, `sources.messages_total` and the logs.
+5. **Deletions in small groups cannot be attributed.** Telegram does not say
+   which chat, so they are counted and dropped (SPEC 4.3 says as much).
+6. **The album handler trusts Telethon's own album assembly.** `events.Album`
+   batches by a short timer; a photo arriving unusually late would be ingested
+   as a separate row. Gap recovery would not fix it, because the row exists.
+
+### Next steps
+
+Phase 2 — parser, regex-first per DECISIONS P.4. Needed from the product owner
+before the manual DoD check can be ticked: the userbot SIM logged in, and three
+to five test sources.

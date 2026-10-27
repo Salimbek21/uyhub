@@ -18,6 +18,7 @@ dependencies = [
     "redis>=6.4,<7",
     "sqlalchemy[asyncio]>=2.0.43,<2.1",
     "structlog>=25.4,<26",
+    "telethon>=1.41,<2",
     "typer>=0.27,<1",
     "uvicorn[standard]>=0.38,<0.39",
 ]
@@ -100,6 +101,13 @@ pretty = true
 [[tool.mypy.overrides]]
 module = ["tests.*", "migrations.*"]
 ignore_errors = true
+
+# Telethon ships no py.typed marker. Its surface is confined to
+# collector/gateway.py and collector/client.py, which is the point of having
+# that boundary at all.
+[[tool.mypy.overrides]]
+module = ["telethon.*"]
+ignore_missing_imports = true
 
 [tool.pydantic-mypy]
 init_typed = true

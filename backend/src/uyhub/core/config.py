@@ -12,6 +12,7 @@ means a ``.env`` that already carries later-phase variables will not break start
 from __future__ import annotations
 
 from functools import lru_cache
+from pathlib import Path
 from typing import Literal
 from urllib.parse import urlsplit, urlunsplit
 
@@ -62,6 +63,19 @@ class Settings(BaseSettings):
     api_host: str = Field(default="127.0.0.1", alias="API_HOST")
     api_port: int = Field(default=8000, ge=1, le=65535, alias="API_PORT")
 
+    # -- Collector (Telethon userbot) ----------------------------------------
+    # The pair identifies the application, not the account; logging in is a
+    # separate, human-run step (SPEC 4.1).
+    tg_api_id: int = Field(default=0, ge=0, alias="TG_API_ID")
+    tg_api_hash: SecretStr = Field(default=SecretStr(""), alias="TG_API_HASH")
+    tg_session_path: Path = Field(
+        default=Path("/data/sessions/uyhub.session"), alias="TG_SESSION_PATH"
+    )
+    collector_max_joins_per_day: int = Field(
+        default=5, ge=0, le=50, alias="COLLECTOR_MAX_JOINS_PER_DAY"
+    )
+    collector_backfill_days: int = Field(default=7, ge=0, le=365, alias="COLLECTOR_BACKFILL_DAYS")
+
     # -- Observability -------------------------------------------------------
     sentry_dsn: SecretStr | None = Field(default=None, alias="SENTRY_DSN")
 
@@ -104,6 +118,15 @@ class Settings(BaseSettings):
     def sync_database_url(self) -> str:
         """Same database, synchronous driver — some tooling cannot speak asyncpg."""
         return self.database_url.replace("postgresql+asyncpg://", "postgresql://", 1)
+
+    @property
+    def has_telegram_credentials(self) -> bool:
+        """True when ``TG_API_ID``/``TG_API_HASH`` are both set.
+
+        The collector refuses to start without them; everything else (tests, the
+        API, migrations) runs fine with the empty defaults.
+        """
+        return self.tg_api_id > 0 and bool(self.tg_api_hash.get_secret_value())
 
 
 def _mask_url_password(url: str) -> str:

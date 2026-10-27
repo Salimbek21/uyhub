@@ -193,6 +193,159 @@ rather than raw Compose so it exercises the same path, including bucket creation
 
 ---
 
+## Product direction (2026-10-27)
+
+### P.1 Build a vertical slice to production, then fill it in
+
+**Context.** The product owner asked for a working product in production. SPEC 17
+sequences eight phases and puts anything user-visible behind five of them.
+
+**Decision.** Build the shortest end-to-end chain first — collector → parser →
+dedup → API → Mini App, deployed on the VPS — and defer the bot, the channel
+poster and the operations phase until real listings are flowing. Phase order
+within the slice still follows SPEC 17; what moved is Phases 6 and 7.
+
+**Consequences.** Real posts become visible weeks earlier, which is what makes
+the parser measurable against real data instead of synthetic fixtures. The cost
+is that production runs for a while without alerting or backups, so the first
+weeks are explicitly a supervised pilot, not a launch.
+
+### P.2 Phone numbers are never stored in plaintext and never served
+
+**Context.** OPEN_QUESTIONS C1: SPEC 13 says where phone numbers live but not
+whether harvesting sellers' numbers from third-party groups and republishing
+them is lawful. SPEC 9.2 specifies a `POST /listings/{id}/contact` endpoint and
+SPEC 3 a `contact_reveals` audit table.
+
+**Decision.** Store only `phone_hashes` (keyed HMAC), which is all that dedup
+needs. Do not add a `phones` column, the contact endpoint, or the
+`contact_reveals` table. The Mini App sends the user to the original Telegram
+post via `listing_sources.tg_link`.
+
+**Consequences.** The highest-impact legal exposure is removed, and the product
+barely changes: the seller is one tap away either way, in the chat where they
+chose to publish. `raw_messages.text` still holds the original post for its
+90-day retention, so a future decision to show numbers is a reparse, not a data
+loss. SPEC 9.2, SPEC 3 and the Mini App's `revealContact` stub are superseded.
+
+### P.3 The first thirty sources are curated and join first
+
+**Context.** OPEN_QUESTIONS A3: five joins per day per account against 50–200
+sources is a 10–40 day ramp, and SPEC 1.3 expects the full list in the MVP.
+
+**Decision.** `sources.priority` (smallint, default 100, lowest first) orders the
+join queue. The curated first batch gets 1–30 and is live in about six days; the
+rest trickle in behind it.
+
+**Consequences.** Useful inventory in under a week without raising the join rate,
+which is the thing that gets accounts banned. The join worker's query is a single
+index scan on `(status, priority)`.
+
+### P.4 The parser ships regex-first, with the LLM behind an interface
+
+**Context.** `ANTHROPIC_API_KEY` is not available yet, and SPEC 6 makes the LLM
+the primary extractor.
+
+**Decision.** Phase 2 implements SPEC 5 (prefilter and regex extraction) behind
+an `ExtractorProtocol`, with the LLM extractor added as a second implementation
+when the key arrives.
+
+**Consequences.** The full chain runs and can be measured without an API key, and
+the switch is one setting rather than a rewrite. Accuracy on complex posts will
+be visibly lower until the LLM is enabled; the eval script is what makes that
+difference a number rather than an opinion.
+
+---
+
+## Phase 1 — Data model and collector
+
+### 1.1 Enum columns are `VARCHAR` + `CHECK`, not native PostgreSQL enums
+
+**Context.** SPEC 3 defines fourteen enumerated columns. Native PostgreSQL enums
+need `ALTER TYPE` to gain a value, which cannot run in a transaction alongside
+other DDL.
+
+**Decision.** `models/base.enum_column()` wraps `sa.Enum(..., native_enum=False,
+create_constraint=True, values_callable=...)`.
+
+**Consequences.** Adding a district or a property type is an ordinary migration.
+`create_constraint=True` is **not** the SQLAlchemy default and is the whole point
+of the helper — without it the column is an unchecked `VARCHAR`; a test writes an
+invalid value and asserts the database rejects it. `values_callable` stores the
+string values rather than the Python member names, so the database matches the
+API.
+
+### 1.2 All of SPEC section 3 in one migration
+
+**Context.** The fourteen tables form one connected foreign-key graph.
+
+**Decision.** Migration `0002` creates all of them. `contact_reveals` is omitted
+(P.2), and `listings` has no plaintext `phones` column.
+
+**Consequences.** No intermediate schema state exists that any code was ever
+written against. `alembic check` passes, so models and migration cannot drift
+silently.
+
+### 1.3 Telethon is confined to one module behind a Protocol
+
+**Context.** CLAUDE.md requires every external call to sit behind an interface
+tests can fake, and forbids tests from touching real Telegram. Telethon ships no
+`py.typed`, so `mypy --strict` cannot see into it.
+
+**Decision.** `collector/gateway.py` is the only module that imports Telethon. It
+defines a `TelegramGateway` Protocol over normalised dataclasses
+(`IncomingMessage`, `DeletedMessages`, `ResolvedChat`) and a `TelethonGateway`
+implementation. `tests/fakes.py` provides an in-memory `FakeGateway`.
+`pyproject.toml` scopes `ignore_missing_imports` to `telethon.*` alone.
+
+**Consequences.** Albums, edits, deletions, gap recovery and flood waits are all
+tested end to end with no network and no mocking library. The untyped third-party
+surface is one file rather than the whole collector. The Protocol has no method
+that sends, forwards or reacts, so the read-only rule is structural rather than a
+convention.
+
+### 1.4 Ingestion is idempotent by upsert, and silent when nothing changed
+
+**Context.** Redis Streams deliver at least once (SPEC 2.3), backfill overlaps
+live handlers by design (SPEC 4.4), and an edit must make the parser look again
+(SPEC 4.3).
+
+**Decision.** `(source_id, tg_message_id)` is unique;
+`MessageIngestor._upsert` does `ON CONFLICT DO UPDATE` and returns whether
+anything actually changed. Only a real change publishes to `stream:raw`, and an
+update always resets `status` to `pending`.
+
+**Consequences.** Restarting the collector recovers missed messages without
+re-queueing the ones it already had — a property with its own test. The parser is
+never woken for a message whose text and edit date are identical to what is
+already stored.
+
+### 1.5 The daily join budget lives in Postgres
+
+**Context.** SPEC 4.2 caps joins per account per day. Joining is the behaviour
+most likely to get a userbot banned.
+
+**Decision.** `tg_accounts.joins_today` and `joins_reset_at`, consumed through
+`accounts.claim_join_slot()` under `SELECT ... FOR UPDATE`.
+
+**Consequences.** A restart cannot hand the account a fresh allowance, and two
+collector processes cannot both spend the last slot. `COLLECTOR_MAX_JOINS_PER_DAY`
+is validated at `le=50` so a typo cannot turn 5 into 500.
+
+### 1.6 `sources` gets its own CLI sub-command group
+
+**Context.** Phase 0's CLI is a flat list of commands. Source management needs
+five verbs.
+
+**Decision.** `app.add_typer(sources_app)`, giving `uyhub sources
+add|list|pause|resume|remove`. Each is one short transaction followed by a
+`sources:changed` publish on Redis.
+
+**Consequences.** A running collector picks up the change within a second without
+a restart, and falls back to a 60-second refresh if the notification is missed.
+
+---
+
 ## Deployment infrastructure (prepared ahead of Phase 8)
 
 Built early because the product owner needs a public HTTPS URL: Telegram refuses to

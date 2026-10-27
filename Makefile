@@ -153,14 +153,20 @@ check: .require-env ## Probe Postgres, Redis and MinIO from the application
 init-storage: .require-env ## Create the MinIO buckets if missing
 	$(RUN) uyhub init-storage
 
-##@ Not implemented yet
+.PHONY: collector
+collector: .require-env ## Run the Telegram collector
+	$(RUN) uyhub collector
+
+##@ Operator commands
 
 .PHONY: login-userbot
-login-userbot: ## Interactive Telethon login — a human runs this (Phase 1)
-	@echo "not implemented until Phase 1 (collector)."
-	@echo "It will be interactive and must be run by a human in their own terminal:"
-	@echo "the phone number, SMS code and 2FA password are typed there and never logged."
-	@exit 1
+login-userbot: .require-env ## Interactive Telethon login — run this yourself, never in CI
+	@echo "Interactive. The phone number, login code and 2FA password are typed"
+	@echo "here and are never logged, stored or sent anywhere but Telegram."
+	@echo
+	$(RUN) python scripts/login_userbot.py
+
+##@ Not implemented yet
 
 .PHONY: eval-parser
 eval-parser: ## Parser accuracy on the golden set (Phase 2)

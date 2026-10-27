@@ -14,7 +14,7 @@ Status values: **open**, **resolved** (with the decision recorded in `DECISIONS.
 |---|---|---|---|
 | A1 | `make lint` is defined as "ruff, mypy, eslint, tsc" and must pass in Phase 0, but `miniapp/` does not exist until Phase 5. | Phase 0 | **resolved** — DECISIONS 0.9 |
 | A2 | CLAUDE.md puts `make eval-parser` (Phase 2) and `make login-userbot` (Phase 1) under "create in Phase 0". | Phase 0 | **resolved** — DECISIONS 0.9 |
-| A3 | `COLLECTOR_MAX_JOINS_PER_DAY=5` on one account against 50–200 sources is 10–40 days to finish joining. SPEC 1.3 expects the full source list in the MVP. | Phase 1 | **open** — needs a product call: slow ramp, more accounts earlier, or a prioritised first 30 sources |
+| A3 | `COLLECTOR_MAX_JOINS_PER_DAY=5` on one account against 50–200 sources is 10–40 days to finish joining. SPEC 1.3 expects the full source list in the MVP. | Phase 1 | **resolved** 2026-10-27 — curated first 30 by `sources.priority`; DECISIONS P.3 |
 | A4 | `LISTING_TTL_DAYS` is one variable with two defaults (30 sale / 14 rent). | Phase 3 | **resolved** — split into `LISTING_TTL_DAYS_SALE` and `_RENT` in `.env.example` |
 | A5 | SPEC 14 requires Prometheus metrics; SPEC 16's production service list has no Prometheus, and `/metrics` is internal-only, so nothing would scrape it. | Phase 7 | **open** |
 | A6 | Sentry is a foreign SaaS and exception payloads carry post text and phone numbers, which SPEC 13 requires to stay in Uzbekistan. | Phase 7 | **open** — either keep Sentry off in production or make PII scrubbing mandatory and auditable |
@@ -41,10 +41,10 @@ Status values: **open**, **resolved** (with the decision recorded in `DECISIONS.
 
 | id | Risk | Resolve by | Status |
 |---|---|---|---|
-| C1 | SPEC 13 covers *where* phone numbers are stored but not *whether* harvesting and republishing sellers' numbers, collected without consent from third-party groups, is lawful. The removal flow is opt-out. No phase currently schedules the legal review SPEC 13 refers to. | **before Phase 6** | **open** — the highest-impact open item |
-| C2 | `POST /listings/{id}/contact` at 30/user/hour with cheap Telegram accounts makes the whole phone database enumerable. | Phase 4 | **open** |
-| C3 | A Telethon userbot violates Telegram's terms; accounts get banned. MVP runs one account, so the pipeline has a single point of failure. Multi-account is "designed for" but never exercised. | Phase 1 | **open** |
-| C4 | Phase 2 grades the parser at ≥ 90 % against a golden set the implementer wrote. A model measured on data it authored will score high and prove nothing. | Phase 2 | **open** — real anonymised posts from Phase 1 should be the gate |
+| C1 | SPEC 13 covers *where* phone numbers are stored but not *whether* harvesting and republishing sellers' numbers, collected without consent from third-party groups, is lawful. The removal flow is opt-out. No phase currently schedules the legal review SPEC 13 refers to. | **before Phase 6** | **resolved** 2026-10-27 — numbers are never stored in plaintext and never served; DECISIONS P.2 |
+| C2 | `POST /listings/{id}/contact` at 30/user/hour with cheap Telegram accounts makes the whole phone database enumerable. | Phase 4 | **resolved** 2026-10-27 — the endpoint is not being built; DECISIONS P.2 |
+| C3 | A Telethon userbot violates Telegram's terms; accounts get banned. MVP runs one account, so the pipeline has a single point of failure. Multi-account is "designed for" but never exercised. | Phase 1 | **open** — Phase 1 ships per-account budgets and flood-wait state, and `sources.account_id`, so a second account is a row plus a second process; that path has never been run |
+| C4 | Phase 2 grades the parser at ≥ 90 % against a golden set the implementer wrote. A model measured on data it authored will score high and prove nothing. | Phase 2 | **accepted** — DECISIONS P.4: the golden set is built from real posts collected in Phase 1, with synthetic ones only as a starting point |
 | C5 | Production runs 2 parser replicas. Two reposts of the same flat processed concurrently both find no match and both create a listing; idempotency is specified per `raw_message_id`, which does not protect the merge path. | Phase 3 | **open** — proposal: Postgres advisory lock on the phone hash |
 | C6 | The LLM's self-reported `confidence` is poorly calibrated but feeds `needs_review` and `quality_score`. | Phase 2 | **open** |
 | C7 | Multi-listing posts are dropped entirely (SPEC 6.6). If realtors' multi-property posts are a large share of volume, that silently discards inventory. | Phase 2 | **open** — must be measured, not assumed small |

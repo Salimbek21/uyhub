@@ -157,12 +157,20 @@ services:
     entrypoint: ["alembic"]
     command: ["upgrade", "head"]
 
-  # Phase 1 onwards. Each is a working entrypoint today but has no real loop yet,
+  # The userbot. Exactly one replica, ever: two processes on one Telethon session
+  # fight over the same account and get it flood-waited.
+  collector:
+    <<: *backend
+    command: ["collector"]
+    volumes:
+      - backend_data:/data
+    deploy:
+      replicas: 1
+      resources:
+        limits: {memory: 768M}
+
+  # Later phases. Each is a working entrypoint today but has no real loop yet,
   # so they are left out of the default set rather than burning a container each.
-  # collector:
-  #   <<: *backend
-  #   command: ["collector"]
-  #   volumes: [backend_data:/data]
   # parser:
   #   <<: *backend
   #   command: ["parser"]

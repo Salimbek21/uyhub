@@ -159,10 +159,33 @@ async def db_connection(migrated_database: str) -> AsyncIterator[AsyncConnection
 
 @pytest.fixture
 async def db_session(db_connection: AsyncConnection) -> AsyncIterator[AsyncSession]:
-    """An ORM session bound to the rolled-back connection."""
-    factory = async_sessionmaker(bind=db_connection, expire_on_commit=False)
+    """An ORM session bound to the rolled-back connection.
+
+    ``create_savepoint`` means a test can provoke an ``IntegrityError`` and then
+    ``rollback()`` without tearing down the outer transaction the fixture owns.
+    """
+    factory = async_sessionmaker(
+        bind=db_connection,
+        expire_on_commit=False,
+        join_transaction_mode="create_savepoint",
+    )
     async with factory() as session:
         yield session
+
+
+@pytest.fixture
+def session_factory(db_connection: AsyncConnection) -> async_sessionmaker[AsyncSession]:
+    """A sessionmaker for code that opens its own sessions and commits.
+
+    ``join_transaction_mode="create_savepoint"`` turns each ``commit()`` into a
+    savepoint release inside the test's outer transaction, so production code can
+    commit for real and the test still rolls everything back afterwards.
+    """
+    return async_sessionmaker(
+        bind=db_connection,
+        expire_on_commit=False,
+        join_transaction_mode="create_savepoint",
+    )
 
 
 # ---------------------------------------------------------------------------

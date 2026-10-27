@@ -81,21 +81,104 @@ and touches no data.
 
 ## 2. Adding a source
 
-TBD — Phase 1. Will be `uyhub sources add <@username | https://t.me/... | invite link>`
-or the bot's `/addsource`. New sources enter `pending_join` and the join worker picks
-them up within a day, subject to `COLLECTOR_MAX_JOINS_PER_DAY`.
+```bash
+uyhub sources add @toshkent_uylar --priority 1    # curated first batch: 1–30
+uyhub sources add https://t.me/+AbCdEf123          # private invite link
+uyhub sources list
+uyhub sources pause 12        # stop reading it, stay in the chat
+uyhub sources resume 12
+uyhub sources remove 12       # mark as left; leaving the chat itself is manual
+```
 
-## 3. Re-logging in the userbot
+In production, prefix with Compose:
 
-TBD — Phase 1.
+```bash
+cd /opt/uyhub
+docker compose -f infra/docker-compose.prod.yml --env-file .env \
+    run --rm api sources list
+```
 
-Two rules that already apply:
+What happens next:
 
-- **A human runs this, never an agent and never CI.** `make login-userbot` is
-  interactive: the phone number, the SMS code and the 2FA password are typed into the
-  operator's own terminal.
-- Those values are never written to a log, a file or a chat. The only artefact is the
-  Telethon session file, mode 0600, in a Docker volume.
+1. The source lands in `pending_join`.
+2. The join worker takes the lowest `priority` first, at most
+   `COLLECTOR_MAX_JOINS_PER_DAY` (5) per account, with a random 10–40 minute gap.
+   **Do not raise that number to go faster** — it is the fastest way to get the
+   account banned.
+3. After joining it backfills history, then flips to `active`.
+4. Every change is published on Redis `sources:changed`, so a running collector
+   starts reading a new source within a second. No restart needed.
+
+A source that cannot be joined goes to `error` with the reason in `error_text`
+(`ChannelPrivateError` means the invite is dead or we were removed).
+
+**Thirty sources takes about six days.** That is the design, not a fault.
+
+## 3. Logging in or re-logging in the userbot
+
+**A human runs this, never an agent and never CI.** It is interactive: the phone
+number, the login code and the 2FA password are typed into the operator's own
+terminal. They are never written to a log, a file or a chat. The only artefact is
+the Telethon session file, mode 0600, in a Docker volume.
+
+Locally:
+
+```bash
+make login-userbot
+```
+
+On the server, the session has to be created inside the container so it lands in
+the `backend_data` volume the collector reads:
+
+```bash
+cd /opt/uyhub
+docker compose -f infra/docker-compose.prod.yml --env-file .env \
+    run --rm -it --entrypoint python collector scripts/login_userbot.py
+```
+
+It asks for the phone number, sends a code, and asks for the code and (if set)
+the 2FA password. On success it registers the account in `tg_accounts`, storing
+only the last four digits of the number.
+
+Then start the collector:
+
+```bash
+docker compose -f infra/docker-compose.prod.yml --env-file .env up -d collector
+docker compose -f infra/docker-compose.prod.yml --env-file .env logs -f collector
+```
+
+`./infra/deploy.sh` skips the collector when no session file exists and says so;
+once the session is there it starts it on every deploy.
+
+### If the account is banned or the session is lost
+
+1. The collector logs `collector.session_missing` or fails readiness.
+2. Get a new SIM, run the login above with a different label:
+   `TG_ACCOUNT_LABEL=secondary ... scripts/login_userbot.py`.
+3. Reassign sources: `UPDATE sources SET account_id = <new> WHERE account_id = <old>;`
+4. The new account starts with a fresh join budget and has to re-join every
+   source at five per day. This is the single point of failure in the MVP
+   (OPEN_QUESTIONS C3).
+
+### Flood waits
+
+A `FloodWaitError` parks the account: `tg_accounts.status = 'flood_wait'` with
+`flood_until`. The collector sleeps it out and clears the flag by itself. A wait
+over an hour is logged at ERROR as `collector.flood_wait_long` and is worth
+looking at — it usually means something raised the request rate.
+
+### Checking the collector is alive
+
+```sql
+SELECT label, status, joins_today, flood_until FROM tg_accounts;
+SELECT id, status, priority, last_message_at, messages_total FROM sources ORDER BY priority;
+SELECT count(*) FROM raw_messages WHERE created_at > now() - interval '1 hour';
+```
+
+```bash
+redis-cli EXISTS collector:heartbeat:1   # 1 = collecting, 0 = not
+redis-cli XLEN stream:raw                # parser backlog
+```
 
 ## 4. Deployment
 
