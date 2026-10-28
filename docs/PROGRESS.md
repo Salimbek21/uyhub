@@ -330,7 +330,7 @@ lock — OPEN_QUESTIONS C5), and `deploy.sh` refreshes the rate before starting.
 
 ### Verified
 
-- `make test` — **445 passed** (was 193)
+- `make test` — **455 passed** (was 193)
 - `make lint` — ruff, `mypy --strict`, eslint, tsc clean
 - `uyhub update-rates` against the real CBU API: `USD 11861.96 on 2026-10-27`
 - `make eval-parser` — 159 posts, 100% rejection precision, 100% listing recall
@@ -350,17 +350,41 @@ text did not say. Both are legitimate; neither makes 100% meaningful.
 The real figure arrives when the userbot is logged in and real anonymised posts
 replace the synthetic ones. CI gates at 90% today purely to catch regressions.
 
+### First contact with real data — 2026-10-28
+
+The userbot was logged in and the collector joined its first real source,
+`KVARTIRA TOSHKENT ARENDA IJARA`, backfilling **47 posts**. Running the parser
+over them found three things no amount of synthetic fixtures would have:
+
+| What broke | Why | Result |
+|---|---|---|
+| 23 of 47 posts rejected as `multi_listing` | The heuristic keyed on two phones + two prices. Real realtor posts write `TEL. x / y` and `Narx: 1400$ _ 1200$ Ga Oberladi` — two numbers, one flat | Re-keyed on two different **room counts**; 23 parsed → 46 |
+| 44 of 46 listings had no `deal_type` | These posts contain no verb at all. The price rule only inferred *sale*, above the floor | Price now decides both ways; 45 of 46 read as `rent`, matching the channel |
+| The parser died on an empty queue | `TimeoutError` — the blocking stream read and the Redis socket timeout were both 5 s | The block is capped below the socket timeout, asserted by a test |
+
+Field coverage on those 46 posts afterwards: `deal_type` 45, `rooms` 43,
+`price_usd` 43, `floor` 43, `property_type` 40, `district` 35, `area_m2` 3.
+Area is low because this source simply does not state it — a format fact, not a
+parser bug.
+
+Every one of these is now a regression test in
+`tests/unit/test_parser_pipeline.py::TestRealPostFormats`, kept separate from
+the synthetic fixtures because it is the only part of the suite that is evidence
+rather than invention.
+
 ### Known gaps
 
-1. **Never run against a real post.** Blocked on the same thing Phase 1 is: the
-   userbot SIM login and a few test sources.
+1. **One source, 47 posts, one day.** The corrections above are real but the
+   sample is one channel's house style. The second source is queued and the
+   join worker picks it up on its own schedule.
 2. **No LLM extractor.** `LLM_ENABLED=true` raises rather than silently running
    the regex one. Complex posts — ones that bury the price in a sentence, or
    describe the property in prose — are where the gap will show.
 3. **Multi-listing detection is a heuristic** needing two phones *and* two
    prices. It will miss some; the counter measures how many (C7).
 4. **Nothing reads `raw_messages.extracted` yet.** Listings are Phase 3, so the
-   Mini App still shows mock data.
+   Mini App still shows mock data — the 46 parsed posts are in the database but
+   not visible to anyone.
 5. **One parser replica.** Two would race on the merge path; the advisory lock
    that makes a second safe is Phase 3 (C5).
 6. **Landline numbers are not collected** — `71` collides with too many prices

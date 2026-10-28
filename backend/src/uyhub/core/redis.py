@@ -15,6 +15,18 @@ from uyhub.core.errors import DependencyUnavailableError
 
 HEALTHCHECK_TIMEOUT_SECONDS = 3.0
 
+MAX_BLOCK_SECONDS = 10.0
+"""Longest a consumer may ask Redis to block waiting for work.
+
+``XREADGROUP ... BLOCK`` holds the socket open with nothing on it, which looks
+exactly like a hung connection to the client. The socket timeout must therefore
+be longer than any intended block, or an idle queue tears the connection down
+every few seconds. :func:`uyhub.core.streams.read_group` caps its block at this
+value; the socket timeout below leaves headroom on top of it.
+"""
+
+SOCKET_TIMEOUT_SECONDS = MAX_BLOCK_SECONDS + 5.0
+
 _client: Redis | None = None
 
 
@@ -26,7 +38,7 @@ def get_redis(settings: Settings | None = None) -> Redis:
         _client = Redis.from_url(
             cfg.redis_url,
             decode_responses=True,
-            socket_timeout=5.0,
+            socket_timeout=SOCKET_TIMEOUT_SECONDS,
             socket_connect_timeout=5.0,
             health_check_interval=30,
         )

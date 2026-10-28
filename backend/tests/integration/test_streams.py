@@ -7,6 +7,8 @@ exactly what a mock would get wrong.
 
 from __future__ import annotations
 
+import time
+
 import pytest
 from redis.asyncio import Redis
 
@@ -131,6 +133,34 @@ async def test_dead_letter_moves_and_acks(redis_client: Redis) -> None:
     assert fields["raw_message_id"] == "9"
     assert fields["_origin_stream"] == STREAM
     assert fields["_error"] == "ValueError"
+
+
+async def test_blocking_on_an_empty_stream_does_not_break_the_connection(
+    redis_client: Redis, monkeypatch: pytest.MonkeyPatch
+) -> None:
+    """Found by running the parser against a real queue that had emptied.
+
+    A blocking XREADGROUP holds the socket open with nothing on it, which the
+    client cannot tell apart from a hung connection. With the block and the
+    socket timeout both at five seconds, every idle read tore the connection
+    down. The block is now capped below the socket timeout — this asserts the
+    relationship rather than the numbers.
+    """
+    from uyhub.core import redis as redis_module
+
+    assert redis_module.SOCKET_TIMEOUT_SECONDS > redis_module.MAX_BLOCK_SECONDS
+
+    # The cap is lowered so the test waits half a second rather than ten; what
+    # is under test is that the request is clamped at all.
+    monkeypatch.setattr(redis_module, "MAX_BLOCK_SECONDS", 0.5)
+
+    await ensure_group(redis_client, STREAM, GROUP)
+    started = time.monotonic()
+    messages = await read_group(redis_client, STREAM, GROUP, "worker-1", block_ms=60_000)
+    elapsed = time.monotonic() - started
+
+    assert messages == []
+    assert elapsed < 5, f"the 60s block was not clamped (took {elapsed:.1f}s)"
 
 
 def test_delivery_count_defaults_to_one() -> None:

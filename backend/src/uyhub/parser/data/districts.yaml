@@ -35,6 +35,9 @@ districts:
       - Мирзо-Улугбек
       - Мирзо-Улугбекский
       - Мирзо Улуғбек
+      # Abbreviated in real posts; folding turns `M.Ulugbek` into `m ulugbek`.
+      - M Ulugbek
+      - М Улугбек
     landmarks: [Darxon, Дархан, Buyuk Ipak Yoli, Карасу, Qorasuv]
 
   olmazor:

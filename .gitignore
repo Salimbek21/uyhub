@@ -74,3 +74,6 @@ infra/data/
 .vscode/
 *.swp
 *~
+
+# Telethon session files, created by `make login-userbot`.
+.sessions/

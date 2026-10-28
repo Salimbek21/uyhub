@@ -91,13 +91,20 @@ async def read_group(
     count: int = 10,
     block_ms: int = 5_000,
 ) -> list[StreamMessage]:
-    """Block for up to ``block_ms`` waiting for new entries for this consumer."""
+    """Block for up to ``block_ms`` waiting for new entries for this consumer.
+
+    The block is capped at :data:`~uyhub.core.redis.MAX_BLOCK_SECONDS`. A block
+    longer than the client's socket timeout is indistinguishable from a hung
+    connection, and an idle queue would then drop the connection on every read.
+    """
+    from uyhub.core.redis import MAX_BLOCK_SECONDS
+
     response = await client.xreadgroup(
         groupname=group,
         consumername=consumer,
         streams={stream: ">"},
         count=count,
-        block=block_ms,
+        block=min(block_ms, int(MAX_BLOCK_SECONDS * 1000)),
     )
     if not response:
         return []

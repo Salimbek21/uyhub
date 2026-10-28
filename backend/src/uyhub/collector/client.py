@@ -40,7 +40,12 @@ def build_client(settings: Settings | None = None) -> TelegramClient:
         msg = "TG_API_ID and TG_API_HASH must be set to run the collector"
         raise ConfigError(msg)
 
-    session_path = cfg.tg_session_path
+    # Telethon opens the session with sqlite, which fails with an opaque
+    # "unable to open database file" if the directory is missing — and the
+    # directory is missing on any machine that is not the Docker image, whose
+    # Dockerfile creates /data/sessions for it.
+    session_path = cfg.tg_session_path.expanduser()
+    session_path.parent.mkdir(parents=True, exist_ok=True)
     _check_session_permissions(session_path)
 
     return TelegramClient(

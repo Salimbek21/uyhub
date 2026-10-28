@@ -55,7 +55,10 @@ _PRICE_RE = re.compile(
     (?P<leading_currency>\$)?\s*
     (?P<amount>{_NUMBER})
     \s*
-    (?P<multiplier>{_MULTIPLIER_PATTERN})?(?!\w)
+    # The boundary belongs inside the optional group: without it the `k`
+    # multiplier matches the `k` in `75 kv`, and outside it the whole match
+    # fails on `50000ye`, where no multiplier is present at all.
+    (?:(?P<multiplier>{_MULTIPLIER_PATTERN})(?!\w))?
     \s*
     (?P<currency>{_USD_PATTERN}|{_UZS_PATTERN})?
     """,
@@ -105,14 +108,20 @@ _FLOORS_OUT_OF_RE = re.compile(
     re.IGNORECASE,
 )
 
+# `100² Metr` and `100 metr kv` turn up in real posts alongside the textbook
+# forms, and the `²` can sit on either side of the unit.
 _AREA_RE = re.compile(
-    rf"(?<!\d)(?P<value>{_NUMBER})\s*(?:kv\.?\s?m|кв\.?\s?м|m\s?2|м\s?2|m²|м²|кв|kv)(?!\w)",
-    re.IGNORECASE,
+    rf"""(?<!\d)(?P<value>{_NUMBER})\s*
+        (?: kv\.?\s?m | кв\.?\s?м | m\s?2 | м\s?2 | m² | м²
+          | ²\s*(?:metr|метр) | (?:metr|метр)\s*(?:kv|кв) | кв | kv )(?!\w)""",
+    re.IGNORECASE | re.VERBOSE,
 )
 _SOTIX_RE = re.compile(
     rf"(?<!\d)(?P<value>{_NUMBER})\s*(?:sotix|sotiq|сотих|соток|сотки|сотка|сот\.?)(?!\w)",
     re.IGNORECASE,
 )
+
+_LIST_ITEM_RE = re.compile(r"^[ \t]*(\d{1,2})[).\-][ \t]", re.MULTILINE)
 
 _NEGOTIABLE_RE = re.compile(
     r"\b(?:kelishiladi|kelishamiz|kelishilgan holda|келишилади|келишамиз|"
@@ -291,6 +300,23 @@ def find_rooms_and_floors(text: str) -> RoomsFloors:
 def _first_int(pattern: re.Pattern[str], text: str) -> int | None:
     match = pattern.search(text)
     return int(match.group(1)) if match else None
+
+
+def find_all_room_counts(text: str) -> set[int]:
+    """Every distinct room count the post states.
+
+    More than one is the clearest sign a post is describing more than one
+    property (SPEC 6.6). Counts outside what a flat can plausibly have are
+    dropped, so a phone fragment or a year cannot masquerade as a room count.
+    """
+    found = {int(match.group(1)) for match in _ROOMS_RE.finditer(text)}
+    found |= {int(match.group(1)) for match in _ROOMS_LABELLED_RE.finditer(text)}
+    return {rooms for rooms in found if 1 <= rooms <= 12}
+
+
+def count_list_items(text: str) -> int:
+    """Numbered list markers at the start of a line: `1)`, `2.`, `3 -`."""
+    return len(_LIST_ITEM_RE.findall(text))
 
 
 def find_area_m2(text: str) -> Decimal | None:

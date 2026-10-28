@@ -129,7 +129,7 @@ class TestPipeline:
     def test_two_contact_numbers_alone_do_not_trigger_multi_listing(
         self, settings: Settings
     ) -> None:
-        """Listing two phone numbers is ordinary; two prices as well is not."""
+        """Listing two phone numbers is ordinary and says nothing about count."""
         text = (
             "3 xonali kvartira sotiladi Chilonzor, 75 m2, narxi 65 000 $. "
             "Tel: 90 111 22 33 yoki 93 444 55 66"
@@ -165,6 +165,92 @@ class TestPipeline:
 
     def test_the_default_extractor_is_the_regex_one(self, settings: Settings) -> None:
         assert default_extractor(settings).name == "regex"
+
+
+class TestRealPostFormats:
+    """Patterns taken from the first 47 real posts the collector brought in.
+
+    Every one of these was a wrong answer before it was a test. They are kept
+    separate from the synthetic fixtures because they are the only part of the
+    suite that is evidence rather than invention.
+    """
+
+    REALTOR_POST = (
+        "#Kvartira\n"
+        "Kimlarga: Oilaga ✅\n"
+        "Manzil: Chilonzor, Globus Torgoviy Sentr Yonida ✅\n"
+        "Xonalar Soni: 5Xona 3/5\n"
+        "Yevro Lux Remont 👔\n"
+        "Narx: 1400$ _ 1200$ Ga Oberladi 👕\n"
+        "TEL. 90 123 45 67 / 93 111 22 33"
+    )
+
+    def test_an_asking_price_and_a_floor_is_one_listing(self, settings: Settings) -> None:
+        """Half of the first real batch was rejected as multi_listing over this.
+
+        `Narx: 1400$ _ 1200$ Ga Oberladi` is one flat with a price the realtor
+        will come down from, and `TEL. x / y` is one realtor with two numbers.
+        """
+        result = parse(self.REALTOR_POST, photo_count=2, settings=settings)
+
+        assert result.status is RawMessageStatus.PARSED
+        assert result.extraction is not None
+        assert result.extraction.rooms == 5
+
+    def test_the_advertised_price_is_the_one_kept(self, settings: Settings) -> None:
+        """Showing the floor would under-promise and surprise the buyer later."""
+        result = parse(self.REALTOR_POST, settings=settings)
+        assert result.extraction is not None
+        assert result.extraction.price_amount == Decimal(1400)
+
+    def test_a_price_with_no_verb_below_the_sale_floor_is_rent(self, settings: Settings) -> None:
+        """These posts name no verb at all; the price is the only signal."""
+        result = parse(self.REALTOR_POST, settings=settings)
+        assert result.extraction is not None
+        assert result.extraction.deal_type is DealType.RENT
+
+    def test_a_price_with_no_verb_above_the_sale_floor_is_a_sale(self, settings: Settings) -> None:
+        text = "Chilonzor, 3 xonali, 3/5/9, Narx: 65 000$. TEL. 90 123 45 67"
+        result = parse(text, settings=settings)
+        assert result.extraction is not None
+        assert result.extraction.deal_type is DealType.SALE
+
+    def test_two_different_room_counts_is_several_listings(self, settings: Settings) -> None:
+        text = (
+            "Kvartiralar:\n"
+            "Chilonzor 2 xonali 48000$ tel 90 111 22 33\n"
+            "Sergeli 3 xonali 56000$ tel 93 444 55 66"
+        )
+        result = parse(text, settings=settings)
+        assert result.reject_reason == "multi_listing"
+
+    def test_a_numbered_list_with_prices_is_several_listings(self, settings: Settings) -> None:
+        text = "Sotiladi:\n1) Chilonzor kvartira 48000$\n2) Sergeli kvartira 56000$"
+        result = parse(text, settings=settings)
+        assert result.reject_reason == "multi_listing"
+
+    def test_the_squared_metre_format(self, settings: Settings) -> None:
+        """Real posts write `( 100² Metr Kotta Kvartira )`."""
+        text = "#Kvartira Mirobod 2Xona 6/10 ( 100² Metr ) Narx: 650$ TEL. 90 123 45 67"
+        result = parse(text, settings=settings)
+        assert result.extraction is not None
+        assert result.extraction.area_m2 == Decimal(100)
+
+    def test_an_abbreviated_district_name(self, settings: Settings) -> None:
+        text = "#Kvartira Manzil: M.Ulugbek Metro Yonida. 2Xona 6/10. Narx: 1000$"
+        result = parse(text, settings=settings)
+        assert result.extraction is not None
+        assert result.extraction.district is District.MIRZO_ULUGBEK
+
+    def test_the_labelled_room_format(self, settings: Settings) -> None:
+        """`Xonalar Soni: 2Xona 6/10` — a label, a count and a floor pair."""
+        result = parse(
+            "#Kvartira Xonalar Soni: 2Xona 6/10 Narx: 1000$ TEL. 90 123 45 67",
+            settings=settings,
+        )
+        assert result.extraction is not None
+        assert result.extraction.rooms == 2
+        assert (result.extraction.floor, result.extraction.floors_total) == (6, 10)
 
     def test_enabling_the_llm_without_one_built_fails_loudly(
         self, monkeypatch: pytest.MonkeyPatch

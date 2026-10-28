@@ -17,18 +17,31 @@ from uyhub.parser import regex_extract as rx
 from uyhub.parser.districts import DistrictMatch, detect_district
 from uyhub.parser.schema import RawExtraction
 
-MULTI_LISTING_PHONES = 2
+MULTI_LISTING_ROOM_COUNTS = 2
+MULTI_LISTING_ITEMS = 2
 MULTI_LISTING_PRICES = 2
-"""A post with at least this many distinct phones *and* prices is probably
-several properties at once. SPEC 6.6 drops those rather than mangling them."""
+"""Thresholds for deciding a post describes several properties (SPEC 6.6).
+
+The signal is the **room count**, not the phone or price count. Measured against
+the first 47 real posts: half of them list two phone numbers and two prices and
+are a single flat — the Tashkent realtor format is `TEL. x / y` for two contact
+numbers and `Narx: 1400$ _ 1200$ Ga Oberladi` for an asking price and the floor
+they will accept. Keying on those rejected 49% of real inventory.
+
+Two *different room counts* is what actually distinguishes two properties, and a
+numbered list is the other giveaway."""
 
 LANDMARK_MAX_LENGTH = 120
 
 SALE_PRICE_FLOOR_USD = Decimal(5_000)
 SALE_PRICE_FLOOR_UZS = Decimal(50_000_000)
-"""A price at or above this, with no verb and no rent period, is a sale. Below
-it the post is ambiguous and the deal type stays null rather than being
-guessed. Matches the sale floor in SPEC 6.3's sanity rules."""
+"""Where a sale price starts, matching SPEC 6.3's sanity bands.
+
+Plenty of real posts name no verb at all — the Tashkent realtor format is a
+labelled list ending in `Narx: 650$`. The price still decides it, in both
+directions: nobody sells a flat for six hundred dollars and nobody rents one
+for sixty thousand. Measured on the first 47 real posts, keying only on the
+upper band left 44 of 46 listings with no deal type."""
 
 
 class Extractor(Protocol):
@@ -56,8 +69,7 @@ class RegexExtractor:
         phones = find_phones(text)
         prices = rx.find_prices(text)
 
-        multi = self._looks_like_several_listings(phones, prices)
-        if multi:
+        if self._looks_like_several_listings(text, prices):
             return RawExtraction(
                 is_listing=False,
                 reject_reason="multi_listing",
@@ -93,14 +105,21 @@ class RegexExtractor:
         return extraction.model_copy(update={"confidence": self._confidence(extraction)})
 
     @staticmethod
-    def _looks_like_several_listings(phones: list[str], prices: list[rx.PriceCandidate]) -> bool:
+    def _looks_like_several_listings(text: str, prices: list[rx.PriceCandidate]) -> bool:
         """SPEC 6.6, without an LLM to ask.
 
-        Requiring both several phones and several prices keeps this from firing
-        on an ordinary listing that lists two contact numbers, which is common.
+        A post describing two flats states two different room counts. Two
+        prices alone do not qualify — an asking price and a negotiable floor
+        are two numbers for one property — and neither do two phone numbers.
         """
+        if len(rx.find_all_room_counts(text)) >= MULTI_LISTING_ROOM_COUNTS:
+            return True
+
         distinct_prices = {(p.amount, p.currency) for p in prices}
-        return len(phones) >= MULTI_LISTING_PHONES and len(distinct_prices) >= MULTI_LISTING_PRICES
+        return (
+            rx.count_list_items(text) >= MULTI_LISTING_ITEMS
+            and len(distinct_prices) >= MULTI_LISTING_PRICES
+        )
 
     @staticmethod
     def _deal_type(text: str, price: rx.PriceCandidate | None) -> DealType | None:
@@ -118,11 +137,9 @@ class RegexExtractor:
             return None
         if rx.find_period(text) is not None:
             return DealType.RENT
-        if price.currency is Currency.USD and price.amount >= SALE_PRICE_FLOOR_USD:
-            return DealType.SALE
-        if price.currency is Currency.UZS and price.amount >= SALE_PRICE_FLOOR_UZS:
-            return DealType.SALE
-        return None
+
+        floor = SALE_PRICE_FLOOR_USD if price.currency is Currency.USD else SALE_PRICE_FLOOR_UZS
+        return DealType.SALE if price.amount >= floor else DealType.RENT
 
     @staticmethod
     def _property_type(

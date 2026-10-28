@@ -427,19 +427,31 @@ collide with.
 the language can correct, and the choice between the two behaviours is visible
 in the term itself rather than buried in the matcher.
 
-### 2.4 Several properties in one post are dropped on a conservative heuristic
+### 2.4 Several properties in one post are detected by the room count
 
 **Context.** SPEC 6.6 drops multi-listing posts and has the LLM detect them.
-There is no LLM yet.
+There is no LLM yet. The first attempt rejected a post with two or more phone
+numbers *and* two or more prices.
 
-**Decision.** Reject as `multi_listing` only when a post has **both** two or
-more distinct phone numbers **and** two or more distinct prices. Every
-rejection is counted.
+**Measurement.** That attempt was run against the first 47 real posts on
+2026-10-28 and rejected **23 of them — half the batch**. Every one was a single
+flat. The Tashkent realtor format is `TEL. x / y` (two contact numbers) and
+`Narx: 1400$ _ 1200$ Ga Oberladi` (an asking price and the floor they will
+accept). Both signals are normal in a single listing, so the rule was measuring
+the wrong thing.
 
-**Consequences.** Listing two contact numbers is ordinary and still parses; a
-genuinely multi-property post usually has both signals. Some will slip through
-and produce one garbled listing until the LLM lands. The counter is what turns
-OPEN_QUESTIONS C7 ("must be measured, not assumed small") into a number.
+**Decision.** Reject as `multi_listing` when the post states **two different
+room counts**, or when it has a numbered list *and* two distinct prices. Phone
+count is not used at all.
+
+**Consequences.** Real inventory stopped being thrown away: the same 47 posts
+went from 23 parsed to 46. A post describing two flats states two room counts;
+one describing a price range does not. The asking price is the one kept —
+showing the floor would under-promise and surprise the buyer later.
+
+This is what OPEN_QUESTIONS C7 asked for: the share is measured, not assumed.
+The number to watch now is how many genuine multi-listing posts slip through,
+which only shows up when someone reads the parsed output.
 
 ### 2.5 The golden set is grouped JSONL, and only states what a post says
 
@@ -456,6 +468,39 @@ counted against district accuracy, so the score measures extraction rather than
 how thoroughly the fixtures were annotated. Two fixtures deliberately state no
 `deal_type` because their text names neither a verb nor a price — the parser is
 right to leave it null, and the fixture says so.
+
+### 2.7 A post with no verb is read as sale or rent from its price
+
+**Context.** SPEC 6.2 expects `deal_type` from the words. A large share of real
+posts contain no verb at all — the realtor format is a labelled list ending in
+`Narx: 650$`.
+
+**Measurement.** On the first 47 real posts, keying only on words and on prices
+above the sale floor left **44 of 46 listings with no deal type**.
+
+**Decision.** When no verb and no rent period are present, the price decides in
+both directions: at or above SPEC 6.3's sale floor it is a sale, below it a
+rent. Nobody sells a flat for six hundred dollars and nobody rents one for
+sixty thousand.
+
+**Consequences.** 45 of 46 of those posts now read as `rent`, which matches the
+channel they came from. A post with no verb *and* no price still yields null,
+because then there is genuinely nothing to go on.
+
+### 2.8 A blocking stream read must be shorter than the socket timeout
+
+**Context.** The parser died with `TimeoutError: Timeout reading from
+localhost:16379` the first time it ran against a queue that had emptied.
+
+**Decision.** `core/redis.MAX_BLOCK_SECONDS` caps how long a consumer may ask
+Redis to block, and the client's socket timeout is set above it.
+`streams.read_group` clamps its argument to the cap.
+
+**Consequences.** `XREADGROUP ... BLOCK` holds the socket open with nothing on
+it, which the client cannot distinguish from a hung connection — with both set
+to five seconds, every idle read tore the connection down. The invariant is now
+expressed in one place and asserted by a test, rather than being two constants
+in different modules that happened to match.
 
 ### 2.6 The CI accuracy gate is 90%, and that number is not SPEC 1.5's
 
