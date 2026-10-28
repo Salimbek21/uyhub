@@ -186,12 +186,20 @@ services:
       resources:
         limits: {memory: 768M}
 
+  # One replica, not the two SPEC 16 suggests. Two parsers racing on the same
+  # repost would each find no match and each create a listing; the advisory lock
+  # that makes a second safe is Phase 3 work (OPEN_QUESTIONS C5). The consumer
+  # group is already in place, so raising this is a one-line change then.
+  parser:
+    <<: *backend
+    command: ["parser"]
+    deploy:
+      replicas: 1
+      resources:
+        limits: {memory: 768M}
+
   # Later phases. Each is a working entrypoint today but has no real loop yet,
   # so they are left out of the default set rather than burning a container each.
-  # parser:
-  #   <<: *backend
-  #   command: ["parser"]
-  #   deploy: {replicas: 2}
   # bot:
   #   <<: *backend
   #   command: ["bot"]

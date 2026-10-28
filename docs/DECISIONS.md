@@ -378,6 +378,102 @@ a restart, and falls back to a 60-second refresh if the notification is missed.
 
 ---
 
+## Phase 2 — Parser
+
+### 2.1 The parser's output lives in `raw_messages.extracted`
+
+**Context.** SPEC section 3 has no table for extracted fields: they only become
+columns in Phase 3, when dedup turns them into a listing. Phase 2 therefore had
+nowhere to put its result.
+
+**Decision.** A nullable `JSONB` column on `raw_messages`, holding a serialised
+`parser.schema.Extraction` (migration `0003`).
+
+**Consequences.** The parser's output is inspectable with a `SELECT`, which is
+how its accuracy gets checked against real posts. `uyhub reparse` becomes
+meaningful — there is a previous answer to compare against. Phase 3 reads the
+column rather than re-extracting, so extraction runs once per message no matter
+how many times dedup reconsiders it.
+
+### 2.2 Phone numbers are found by operator code, not by shape
+
+**Context.** Uzbek mobile numbers are nine digits. So are so'm prices:
+`90 123 45 67` and `650 000 000` differ only in what they mean. A regex for one
+matches the other.
+
+**Decision.** `core/phones.py` accepts a bare nine-digit run only when it starts
+with a real mobile operator code, and never when a currency word follows it.
+Landline codes are excluded entirely — a Tashkent landline in a listing is rare
+and `71` collides with too many prices to be worth the recall.
+
+**Consequences.** Prices stay in the description and out of `phone_hashes`, and
+the same decision function drives both finding and stripping, so a price can
+never be deleted from the description by mistake. The cost is the occasional
+landline we do not record.
+
+### 2.3 Terms are data with a `*` wildcard, and matching is by prefix
+
+**Context.** Both languages inflect. Uzbek agglutinates (`gisht`, `gishtli`,
+`gishtdan`); Russian declines through six cases (`кирпичный`, `кирпичном`).
+Whole-word matching missed most real posts; prefix matching everywhere turned
+`дом` into `домашний`.
+
+**Decision.** A term ending in — or containing — `*` matches any word ending;
+a term without one must match a whole word. District aliases match by prefix
+unconditionally, because the names are distinctive enough to have nothing to
+collide with.
+
+**Consequences.** The keyword lists stay readable data that a person who knows
+the language can correct, and the choice between the two behaviours is visible
+in the term itself rather than buried in the matcher.
+
+### 2.4 Several properties in one post are dropped on a conservative heuristic
+
+**Context.** SPEC 6.6 drops multi-listing posts and has the LLM detect them.
+There is no LLM yet.
+
+**Decision.** Reject as `multi_listing` only when a post has **both** two or
+more distinct phone numbers **and** two or more distinct prices. Every
+rejection is counted.
+
+**Consequences.** Listing two contact numbers is ordinary and still parses; a
+genuinely multi-property post usually has both signals. Some will slip through
+and produce one garbled listing until the LLM lands. The counter is what turns
+OPEN_QUESTIONS C7 ("must be measured, not assumed small") into a number.
+
+### 2.5 The golden set is grouped JSONL, and only states what a post says
+
+**Context.** SPEC 6.4 wants 150+ posts each with an expected JSON. A directory
+of 150 single-post files is unreadable as a set, and the thing a human needs to
+do with these is scan them for whether they still look like real posts.
+
+**Decision.** Seven JSONL files under `backend/tests/fixtures/posts/`, grouped
+by kind. An `expected` object may omit any field, and only the keys present are
+scored.
+
+**Consequences.** A post that genuinely does not name its district is not
+counted against district accuracy, so the score measures extraction rather than
+how thoroughly the fixtures were annotated. Two fixtures deliberately state no
+`deal_type` because their text names neither a verb nor a price — the parser is
+right to leave it null, and the fixture says so.
+
+### 2.6 The CI accuracy gate is 90%, and that number is not SPEC 1.5's
+
+**Context.** SPEC 1.5 asks for ≥90% on five fields. The eval currently reports
+100% on all five.
+
+**Decision.** CI gates at 90% field accuracy and 95% rejection precision, and
+the thresholds are command-line arguments rather than constants.
+
+**Consequences.** **The 100% is not an accuracy measurement.** The golden set is
+synthetic and was written alongside the parser that is scored on it — precisely
+the trap OPEN_QUESTIONS C4 warns about. The gate exists to catch a regression,
+not to certify quality. The real figure arrives when the userbot is logged in
+and real anonymised posts replace the synthetic ones; the thresholds move then,
+and again when the LLM extractor lands.
+
+---
+
 ## Deployment infrastructure (prepared ahead of Phase 8)
 
 Built early because the product owner needs a public HTTPS URL: Telegram refuses to

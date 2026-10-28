@@ -1,0 +1,43 @@
+# Phrases that mark a post as not a listing, whatever else it contains
+# (SPEC 5.1 "source-specific ad patterns").
+#
+# These win over the signal keywords, because a post advertising a renovation
+# service will happily contain `remont`, `kvartira` and a price. Keep entries
+# specific: a word that also appears in real listings belongs nowhere near here.
+
+# --- group administration ---
+guruh qoidalari
+группа правила
+правила группы
+admin bilan boglaning
+reklama uchun
+по рекламе
+реклама
+obuna boling
+подпишитесь
+подписывайтесь
+kanalimizga
+наш канал
+
+# --- services, not properties ---
+qurilish xizmati
+строительные услуги
+ремонт под ключ
+дизайн интерьера
+ichki bezak
+kochirish xizmati
+услуги грузчиков
+перевозка мебели
+ipoteka rasmiylashtirish
+оформление ипотеки
+кредит под залог
+
+# --- wanted, not offered ---
+kerak edi
+ijaraga kerak
+сниму квартиру
+сниму
+куплю квартиру
+ищу квартиру
+ищу жилье
+kvartira qidiryapman

@@ -169,9 +169,8 @@ login-userbot: .require-env ## Interactive Telethon login — run this yourself,
 ##@ Not implemented yet
 
 .PHONY: eval-parser
-eval-parser: ## Parser accuracy on the golden set (Phase 2)
-	@echo "not implemented until Phase 2 (parser)."
-	@exit 1
+eval-parser: ## Parser accuracy on the golden set
+	$(RUN) python tests/eval/run_eval.py $(ARGS)
 
 .PHONY: seed
 seed: ## Seed 200k listings for the performance test (Phase 4)

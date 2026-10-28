@@ -8,6 +8,7 @@ from __future__ import annotations
 
 import asyncio
 from collections.abc import Awaitable, Callable
+from datetime import UTC, datetime
 from typing import TYPE_CHECKING
 
 import typer
@@ -56,10 +57,93 @@ def collector() -> None:
 
 
 @app.command()
-def parser() -> None:
-    """Run the parser worker (prefilter, regex, LLM). Implemented in Phase 2."""
-    _bootstrap("parser")
-    asyncio.run(run_until_stopped("parser"))
+def parser(
+    consumer: str = typer.Option("parser-1", help="Consumer name within the group."),
+) -> None:
+    """Run the parser worker: consume stream:raw, extract, store."""
+    from uyhub.core.db import dispose_engine, get_sessionmaker
+    from uyhub.core.redis import close_redis, get_redis
+    from uyhub.parser.runner import run_parser
+
+    settings = _bootstrap("parser")
+
+    async def _run() -> None:
+        try:
+            await run_parser(
+                session_factory=get_sessionmaker(settings),
+                redis=get_redis(settings),
+                settings=settings,
+                consumer_name=consumer,
+            )
+        finally:
+            await dispose_engine()
+            await close_redis()
+
+    asyncio.run(_run())
+
+
+@app.command(name="reparse")
+def reparse(
+    since: str | None = typer.Option(None, help="ISO date; only messages posted after it."),
+    version_below: int | None = typer.Option(
+        None, help="Only messages parsed by a version older than this."
+    ),
+    limit: int = typer.Option(1000, help="Maximum messages to re-queue."),
+) -> None:
+    """Re-queue stored messages so an improved parser can run over them again.
+
+    Nothing is re-extracted here; the messages are simply published back onto
+    stream:raw and the running parser picks them up.
+    """
+    from uyhub.core.db import dispose_engine, session_scope
+    from uyhub.core.redis import close_redis, get_redis
+    from uyhub.parser.reparse import requeue
+
+    settings = _bootstrap("cli")
+
+    async def _run() -> int:
+        try:
+            async with session_scope() as session:
+                return await requeue(
+                    session,
+                    get_redis(settings),
+                    since=_parse_date(since),
+                    version_below=version_below,
+                    limit=limit,
+                )
+        finally:
+            await dispose_engine()
+            await close_redis()
+
+    typer.echo(f"re-queued {asyncio.run(_run())} messages")
+
+
+def _parse_date(value: str | None) -> datetime | None:
+    if value is None:
+        return None
+    parsed = datetime.fromisoformat(value)
+    return parsed if parsed.tzinfo else parsed.replace(tzinfo=UTC)
+
+
+@app.command(name="update-rates")
+def update_rates() -> None:
+    """Fetch today's CBU exchange rate and store it. Idempotent."""
+    from uyhub.core.db import dispose_engine, session_scope
+    from uyhub.rates.cbu import CbuRateProvider
+    from uyhub.rates.store import save_rate
+
+    settings = _bootstrap("cli")
+
+    async def _run() -> str:
+        try:
+            rate = await CbuRateProvider(settings).fetch()
+            async with session_scope() as session:
+                await save_rate(session, rate)
+            return f"{rate.currency.value} {rate.rate_uzs} on {rate.on_date.isoformat()}"
+        finally:
+            await dispose_engine()
+
+    typer.echo(asyncio.run(_run()))
 
 
 @app.command()

@@ -136,5 +136,34 @@ jobs:
             echo "miniapp/ not present yet (Phase 5) — nothing to audit."
           fi
 
-  # Phase 2 adds: parser accuracy evaluation on the golden set in recorded mode,
-  # failing below the thresholds in SPEC section 1.5.
+  eval:
+    name: Parser accuracy
+    runs-on: ubuntu-latest
+    timeout-minutes: 10
+    steps:
+      - uses: actions/checkout@v5
+
+      - name: Install uv
+        uses: astral-sh/setup-uv@v6
+        with:
+          enable-cache: true
+          cache-dependency-glob: backend/uv.lock
+
+      - name: Install dependencies
+        working-directory: backend
+        run: uv sync --frozen
+
+      # Needs no database, Redis or network: the pipeline is a pure function and
+      # the golden set is files on disk.
+      #
+      # The threshold is not SPEC 1.5's 90%. That figure assumes an LLM
+      # extractor, and the golden set is still synthetic — scoring a parser on
+      # text written alongside it flatters it (OPEN_QUESTIONS C4). This gate is
+      # set to catch a regression, and moves up when real posts replace the
+      # synthetic ones and the LLM extractor lands.
+      - name: Evaluate the parser on the golden set
+        working-directory: backend
+        run: |
+          uv run python tests/eval/run_eval.py \
+            --min-field-accuracy 0.90 \
+            --min-rejection-precision 0.95

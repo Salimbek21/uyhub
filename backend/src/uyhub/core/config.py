@@ -76,6 +76,24 @@ class Settings(BaseSettings):
     )
     collector_backfill_days: int = Field(default=7, ge=0, le=365, alias="COLLECTOR_BACKFILL_DAYS")
 
+    # -- Parser --------------------------------------------------------------
+    parser_version: int = Field(default=1, ge=1, alias="PARSER_VERSION")
+    """Bumped whenever extraction rules change, so `parser reparse
+    --version-below N` can find everything parsed by the older logic."""
+
+    llm_enabled: bool = Field(default=False, alias="LLM_ENABLED")
+    """Off until ANTHROPIC_API_KEY exists; the regex extractor runs alone
+    (docs/DECISIONS.md P.4)."""
+
+    phone_hash_key: SecretStr = Field(default=SecretStr(""), alias="PHONE_HASH_KEY")
+    """HMAC key for phone hashes. Changing it orphans every `suppressed_phones`
+    row and un-suppresses listings whose owners asked for removal."""
+
+    cbu_api_url: str = Field(
+        default="https://cbu.uz/uz/arkhiv-kursov-valyut/json/",
+        alias="CBU_API_URL",
+    )
+
     # -- Observability -------------------------------------------------------
     sentry_dsn: SecretStr | None = Field(default=None, alias="SENTRY_DSN")
 

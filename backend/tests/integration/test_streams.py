@@ -134,5 +134,6 @@ async def test_dead_letter_moves_and_acks(redis_client: Redis) -> None:
 
 
 def test_delivery_count_defaults_to_one() -> None:
-    assert StreamMessage(id="1-0", fields={}).delivery_count == 1
-    assert StreamMessage(id="1-0", fields={"_deliveries": "3"}).delivery_count == 3
+    """XREADGROUP does not report it; a first delivery is 1 by definition."""
+    assert StreamMessage(id="1-0", fields={}).deliveries == 1
+    assert StreamMessage(id="1-0", fields={}, deliveries=3).deliveries == 3

@@ -46,11 +46,12 @@ class StreamMessage:
 
     id: str
     fields: dict[str, str]
+    deliveries: int = 1
+    """How many times Redis has handed this entry to a consumer.
 
-    @property
-    def delivery_count(self) -> int:
-        """How many times this entry has been delivered, when known."""
-        return int(self.fields.get("_deliveries", "1"))
+    Only :func:`claim_stale` knows the real number — ``XREADGROUP`` does not
+    report it, and a first delivery is 1 by definition.
+    """
 
 
 async def publish(
@@ -114,20 +115,41 @@ async def claim_stale(
     consumer: str,
     *,
     count: int = 10,
+    min_idle_ms: int = STALE_MESSAGE_MS,
 ) -> list[StreamMessage]:
     """Take over entries abandoned by a consumer that died mid-work.
 
     Without this, a pod that is killed between ``XREADGROUP`` and ``XACK`` leaves
     its messages pending forever.
+
+    Pending entries are looked up before being claimed, rather than using
+    ``XAUTOCLAIM`` directly, because only ``XPENDING`` reports how many times an
+    entry has already been delivered — and that count is what decides when to
+    give up on a message instead of redelivering it forever.
     """
-    _cursor, entries, _deleted = await client.xautoclaim(
+    pending = await client.xpending_range(
+        name=stream,
+        groupname=group,
+        min="-",
+        max="+",
+        count=count,
+        idle=min_idle_ms,
+    )
+    if not pending:
+        return []
+
+    deliveries = {str(entry["message_id"]): int(entry["times_delivered"]) for entry in pending}
+    claimed = await client.xclaim(
         name=stream,
         groupname=group,
         consumername=consumer,
-        min_idle_time=STALE_MESSAGE_MS,
-        count=count,
+        min_idle_time=min_idle_ms,
+        message_ids=list(deliveries),
     )
-    return [StreamMessage(id=entry_id, fields=fields) for entry_id, fields in entries]
+    return [
+        StreamMessage(id=entry_id, fields=fields, deliveries=deliveries.get(entry_id, 1))
+        for entry_id, fields in claimed
+    ]
 
 
 async def ack(client: Redis, stream: str, group: str, *entry_ids: str) -> None:

@@ -1,0 +1,79 @@
+# The twelve districts of Tashkent (SPEC 6.5).
+#
+# This file is data, not code: it is meant to be read and corrected by a human
+# who knows the city. Adding an alias needs no deployment logic, only a review.
+#
+# `aliases` are names of the district itself, in Uzbek Latin, Uzbek Cyrillic and
+# Russian, including the spellings people actually type and the older names.
+# Matching folds case and the Uzbek apostrophes (oʻ/o'/o` -> o), so each alias
+# only needs to appear once in its plain form.
+#
+# `landmarks` are massiv, kvartal and place names that identify a district on
+# their own. The bar for adding one is high: it must be unambiguous across the
+# whole city, because a wrong entry here silently mislabels every listing that
+# mentions it. When in doubt, leave it out — the district simply stays null.
+
+districts:
+  bektemir:
+    aliases: [Bektemir, Бектемир, Бектемирский]
+    landmarks: []
+
+  chilonzor:
+    aliases: [Chilonzor, Chilanzar, Chilonzar, Чилонзор, Чиланзар, Чиланзарский]
+    landmarks: [Qatortol, Катартал, Bunyodkor, Бунёдкор]
+
+  mirobod:
+    aliases: [Mirobod, Mirabad, Миробод, Мирабад, Мирабадский]
+    landmarks: [Oybek, Ойбек]
+
+  mirzo_ulugbek:
+    aliases:
+      - Mirzo Ulugbek
+      - Mirzo-Ulugbek
+      - Mirzo Ulugbek tumani
+      - Мирзо Улугбек
+      - Мирзо-Улугбек
+      - Мирзо-Улугбекский
+      - Мирзо Улуғбек
+    landmarks: [Darxon, Дархан, Buyuk Ipak Yoli, Карасу, Qorasuv]
+
+  olmazor:
+    aliases: [Olmazor, Almazar, Олмазор, Алмазар, Алмазарский]
+    landmarks: [Yangiobod, Янгиобод]
+
+  sergeli:
+    aliases: [Sergeli, Сергели, Сергелийский]
+    landmarks: []
+
+  shayxontohur:
+    aliases:
+      - Shayxontohur
+      - Shaykhantakhur
+      - Shayxontoxur
+      - Шайхонтохур
+      - Шайхантахур
+      - Шайхантахурский
+    landmarks: [Chorsu, Чорсу, Beshyogoch, Бешагач, Kukcha, Кукча, Sebzor, Себзар]
+
+  uchtepa:
+    # `Учтепин` is listed separately because matching is by prefix and the
+    # Russian adjective drops the final `а`: Учтепинский, Учтепинском.
+    aliases: [Uchtepa, Учтепа, Учтепин]
+    landmarks: []
+
+  yakkasaroy:
+    aliases: [Yakkasaroy, Yakkasaray, Яккасарой, Яккасарай, Яккасарайский]
+    landmarks: []
+
+  yashnobod:
+    # Hamza is the pre-2017 name of this district and still in common use.
+    aliases: [Yashnobod, Yashnabad, Яшнобод, Яшнабад, Яшнабадский, Hamza, Хамза]
+    landmarks: [Tuzel, Тузель]
+
+  yunusobod:
+    aliases: [Yunusobod, Yunusabad, Юнусобод, Юнусабад, Юнусабадский]
+    landmarks: [Minor, Минор, Shahriston, Шахристан]
+
+  yangihayot:
+    aliases: [Yangihayot, Yangi hayot, Янгихаёт, Янгихает, Янгихаётский]
+    landmarks: []

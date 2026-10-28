@@ -286,3 +286,88 @@ every enum column was an unchecked `VARCHAR`; and the `db_session` fixture neede
 Phase 2 — parser, regex-first per DECISIONS P.4. Needed from the product owner
 before the manual DoD check can be ticked: the userbot SIM logged in, and three
 to five test sources.
+
+---
+
+## Phase 2 — Parser ✅ (regex stage)
+
+Completed 2026-10-28. Built regex-first per DECISIONS P.4; the LLM extractor
+slots in behind the same interface when `ANTHROPIC_API_KEY` arrives.
+
+### What was built
+
+**Data files, not code** (`parser/data/`) — SPEC 5.1 is explicit that the
+keyword lists live outside the source. Three keyword files (Uzbek Latin, Uzbek
+Cyrillic, Russian), a stopword file, and `districts.yaml` with the twelve
+districts, their aliases in every script and spelling, and the landmarks that
+identify a district on their own.
+
+**The parser** (`parser/`, nine modules):
+
+| Module | Contents |
+|---|---|
+| `schema.py` | `RawExtraction` (what an extractor claims, SPEC 6.2) and `Extraction` (what gets stored, after 6.3). Two models so the eval can score an extractor without normalisation flattering it |
+| `prefilter.py` | SPEC 5.1 rejection, with the reason counted. Stopwords beat signals; a short question with no price is conversation |
+| `regex_extract.py` | Prices in every written form, `R/F/T`, rooms spelled or labelled, floors, area, sotix, negotiable, and the keyword-driven categories |
+| `districts.py` | Loading `districts.yaml`, folding text for matching, and refusing to guess when two districts are named |
+| `extractor.py` | `Extractor` protocol + `RegexExtractor`; infers the deal type from the price when the post names no verb |
+| `normalize.py` | USD conversion, SPEC 6.3 sanity rules → `needs_review` with reasons, description cleaning, `quality_score`, Uzbek title |
+| `pipeline.py` | `parse()` — prefilter → extract → normalise as one **pure function**, which is what lets the eval run the real pipeline |
+| `runner.py` | The worker: consume `stream:raw`, parse, write back, ack; dead-letter after five deliveries |
+| `reparse.py` | Re-queue stored messages so one code path still does the writing |
+
+**Supporting:** `core/phones.py` (E.164 + keyed HMAC, and telling a phone from
+a price), `rates/` (CBU client behind a protocol + store), migration `0003`
+adding `raw_messages.extracted`.
+
+**CLI:** `uyhub parser`, `uyhub reparse --since/--version-below`,
+`uyhub update-rates`. **Production:** the `parser` service is live in the prod
+compose at one replica (two race on the merge path until Phase 3's advisory
+lock — OPEN_QUESTIONS C5), and `deploy.sh` refreshes the rate before starting.
+
+**Golden set and eval:** 159 posts across seven JSONL files, and
+`make eval-parser`, which CI now gates on.
+
+### Verified
+
+- `make test` — **445 passed** (was 193)
+- `make lint` — ruff, `mypy --strict`, eslint, tsc clean
+- `uyhub update-rates` against the real CBU API: `USD 11861.96 on 2026-10-27`
+- `make eval-parser` — 159 posts, 100% rejection precision, 100% listing recall
+
+### The accuracy number, honestly
+
+`make eval-parser` reports **100% on all five SPEC 1.5 fields**. That is not an
+accuracy measurement and must not be quoted as one.
+
+The golden set is synthetic, and the parser was tuned against it in the same
+sitting — the exact failure OPEN_QUESTIONS C4 describes. Every mistake the first
+run surfaced was fixed by changing the parser (Russian declensions, labelled
+lists, a newline welding a number to the next label, the `k` multiplier matching
+the `k` in `75 kv`) or by correcting a fixture that asserted something its own
+text did not say. Both are legitimate; neither makes 100% meaningful.
+
+The real figure arrives when the userbot is logged in and real anonymised posts
+replace the synthetic ones. CI gates at 90% today purely to catch regressions.
+
+### Known gaps
+
+1. **Never run against a real post.** Blocked on the same thing Phase 1 is: the
+   userbot SIM login and a few test sources.
+2. **No LLM extractor.** `LLM_ENABLED=true` raises rather than silently running
+   the regex one. Complex posts — ones that bury the price in a sentence, or
+   describe the property in prose — are where the gap will show.
+3. **Multi-listing detection is a heuristic** needing two phones *and* two
+   prices. It will miss some; the counter measures how many (C7).
+4. **Nothing reads `raw_messages.extracted` yet.** Listings are Phase 3, so the
+   Mini App still shows mock data.
+5. **One parser replica.** Two would race on the merge path; the advisory lock
+   that makes a second safe is Phase 3 (C5).
+6. **Landline numbers are not collected** — `71` collides with too many prices
+   to match without an explicit `+998` (DECISIONS 2.2).
+
+### Next steps
+
+Phase 3 — dedup, media processing and the listing lifecycle. That is the step
+that first produces rows in `listings`, and therefore the first point at which
+the Mini App can show something real.

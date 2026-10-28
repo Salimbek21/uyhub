@@ -179,6 +179,86 @@ redis-cli EXISTS collector:heartbeat:1   # 1 = collecting, 0 = not
 redis-cli XLEN stream:raw                # parser backlog
 ```
 
+## 3b. Running and tuning the parser
+
+The parser consumes `stream:raw`, writes its reading into
+`raw_messages.extracted`, and acks. It needs `PHONE_HASH_KEY` set or it refuses
+to start.
+
+```bash
+uyhub parser                       # locally
+docker compose -f infra/docker-compose.prod.yml --env-file .env logs -f parser
+```
+
+### Is it keeping up?
+
+```bash
+redis-cli XLEN stream:raw          # queue depth
+redis-cli XPENDING stream:raw parser
+redis-cli XLEN stream:dead         # messages that failed five times
+```
+
+```sql
+SELECT status, count(*) FROM raw_messages GROUP BY status;
+SELECT extracted->>'reject_reason' AS reason, count(*)
+  FROM raw_messages WHERE status LIKE 'rejected%' GROUP BY 1 ORDER BY 2 DESC;
+```
+
+A growing `stream:raw` with a healthy parser means the parser is slower than the
+collector, which at MVP volume should not happen — check the logs before
+raising the replica count, and read OPEN_QUESTIONS C5 first: two parsers race on
+the merge path until Phase 3 adds the advisory lock.
+
+### Exchange rates
+
+So'm prices are converted to USD with the Central Bank's daily rate. Without a
+rate, `price_usd` is left null and the listing drops out of every price filter —
+deliberately, because a wrong number there is worse than a missing one.
+
+```bash
+uyhub update-rates                 # idempotent; deploy.sh runs it too
+```
+
+```sql
+SELECT date, rate_uzs FROM exchange_rates ORDER BY date DESC LIMIT 5;
+```
+
+A rate older than 14 days is ignored. If the job has been failing, fix it before
+worrying about the listings — they recover on the next parse or reparse.
+
+### Improving extraction
+
+The keyword lists and the district table are data, in
+`backend/src/uyhub/parser/data/`. Editing them needs no code change:
+
+- `keywords_*.txt` — what marks a post as a listing. Widening these raises
+  recall and lowers rejection precision.
+- `stopwords.txt` — what marks a post as *not* a listing whatever else it says.
+  A stopword beats every signal, so keep entries specific.
+- `districts.yaml` — aliases and landmarks. Matching is by prefix, so
+  `Chilonzor` already covers `Chilonzorda`. A wrong landmark silently mislabels
+  every listing that mentions it; the bar for adding one is high.
+
+After any edit:
+
+```bash
+make eval-parser                   # per-field accuracy and the first mistakes
+```
+
+Then bump `PARSER_VERSION` and re-run the improved logic over history:
+
+```bash
+uyhub reparse --version-below 2 --limit 5000
+```
+
+`reparse` only re-queues; the running worker does the work. Messages whose text
+retention has already purged are skipped — they cannot be reparsed
+(OPEN_QUESTIONS A7).
+
+**The eval's current 100% is not an accuracy figure.** The golden set is
+synthetic and was written alongside the parser. Treat the number as a regression
+signal until real anonymised posts replace it (docs/DECISIONS.md 2.6).
+
 ## 4. Deployment
 
 ### 4.1 What to buy

@@ -1,0 +1,41 @@
+# Listing signals, Uzbek Cyrillic (SPEC 5.1).
+#
+# Still widely used in Tashkent property groups, and distinct enough from
+# Russian to be worth its own list — `ҳовли` and `мўлжал` are Uzbek words
+# written in Cyrillic, not Russian ones.
+
+# --- the deal itself ---
+сотилади
+сотувда
+сотаман
+сотамиз
+ижарага
+ижара
+ижарага берилади
+
+# --- what is on offer ---
+хонали
+хона
+квартира
+ҳовли
+уй
+участка
+ер участка
+сотих
+дўкон
+тижорат
+
+# --- attributes ---
+мўлжал
+мулжал
+ремонт
+таъмир
+қават
+қаватли
+майдони
+
+# --- price ---
+нархи
+нарх
+келишилади
+келишамиз

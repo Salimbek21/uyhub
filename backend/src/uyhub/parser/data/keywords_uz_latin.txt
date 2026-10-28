@@ -1,0 +1,57 @@
+# Listing signals, Uzbek Latin (SPEC 5.1).
+#
+# One per line. Blank lines and lines starting with # are ignored. Matching
+# folds case and the Uzbek apostrophes, so write the plain form: `mo'ljal` and
+# `moljal` both reach this list as `moljal`.
+#
+# These are the words that make a post worth spending extraction on. Adding one
+# widens the funnel; removing one narrows it. `make eval-parser` reports what
+# each change does to the rejection precision.
+
+# --- the deal itself ---
+sotiladi
+sotuvda
+sotaman
+sotamiz
+sotilmoqda
+ijaraga
+ijara
+ijaraga beriladi
+arenda
+
+# --- what is on offer ---
+xonali
+xona
+kvartira
+hovli
+# Bare `uy` is deliberately absent: it means "home" as much as "house" and
+# turns every "uyda nima gap" into a listing. `uy sotiladi` is covered by
+# `sotiladi`, and `hovli` carries the real signal.
+uy joy
+uchastka
+yer uchastka
+sotix
+ofis
+dokon
+tijorat
+turar joy
+
+# --- attributes ---
+moljal
+remont
+tamir
+ta mir
+evro remont
+yevro remont
+qavat
+qavatli
+maydoni
+kv m
+m2
+
+# --- price ---
+narxi
+narx
+kelishiladi
+kelishamiz
+shartnoma

@@ -132,6 +132,14 @@ class RawMessage(IdMixin, TimestampMixin, Base):
         default=RawMessageStatus.PENDING,
     )
     parser_version: Mapped[int | None] = mapped_column(Integer)
+    extracted: Mapped[dict[str, Any] | None] = mapped_column(JSONB)
+    """What the parser read out of ``text`` — a ``parser.schema.Extraction``.
+
+    SPEC section 3 has no home for this: the extracted fields only reach a
+    table in Phase 3, when dedup turns them into a listing. Keeping them here
+    makes the parser's output inspectable, makes ``parser reparse`` meaningful,
+    and lets dedup read rather than re-extract (docs/DECISIONS.md 2.1).
+    """
     listing_id: Mapped[uuid.UUID | None] = mapped_column(
         ForeignKey("listings.id", ondelete="SET NULL")
     )

@@ -41,7 +41,8 @@ die()  { printf '\033[1;31merror:\033[0m %s\n' "$*" >&2; exit 1; }
 perms=$(stat -c '%a' .env 2>/dev/null || stat -f '%OLp' .env)
 [[ "$perms" == "600" ]] || warn ".env is mode $perms; it should be 600. Run: chmod 600 .env"
 
-for required in DOMAIN ACME_EMAIL POSTGRES_PASSWORD DATABASE_URL S3_SECRET_KEY TG_API_ID TG_API_HASH; do
+for required in DOMAIN ACME_EMAIL POSTGRES_PASSWORD DATABASE_URL S3_SECRET_KEY \
+                TG_API_ID TG_API_HASH PHONE_HASH_KEY; do
     grep -qE "^${required}=.+" .env || die "$required is not set in .env"
 done
 
@@ -116,8 +117,14 @@ if ! "${COMPOSE_TOOLS[@]}" run --rm migrate; then
     die "Migrations failed. Nothing was switched over; the previous version is still serving."
 fi
 
+log "Refreshing the exchange rate"
+# Not fatal: a stale rate only means so'm prices keep yesterday's USD value,
+# while a failed deploy over cbu.uz being down would be absurd.
+"${COMPOSE_TOOLS[@]}" run --rm --entrypoint uyhub migrate update-rates \
+    || warn "Could not fetch today's CBU rate; the last stored one stays in use."
+
 log "Starting application and edge"
-"${COMPOSE[@]}" up -d --wait api caddy
+"${COMPOSE[@]}" up -d --wait api caddy parser
 
 # The collector needs a Telethon session, and only a human can create one. On a
 # server that has never had `make login-userbot` run, starting it would just

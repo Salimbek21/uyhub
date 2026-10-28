@@ -1,0 +1,25 @@
+{"id": "non-001", "text": "Assalomu alaykum hurmatli guruh a'zolari, hammaga xayrli kun", "photos": 0, "expected": {"is_listing": false}}
+{"id": "non-002", "text": "Здравствуйте! Кто-нибудь знает хорошего риелтора?", "photos": 0, "expected": {"is_listing": false}}
+{"id": "non-003", "text": "Ремонт под ключ, качественно и недорого. Квартира, дом, офис. Цена договорная. 90 123 45 67", "photos": 5, "expected": {"is_listing": false}}
+{"id": "non-004", "text": "Сниму 2-комнатную квартиру в Чиланзаре, до 400 у.е. в месяц. 93 111 22 33", "photos": 0, "expected": {"is_listing": false}}
+{"id": "non-005", "text": "Kvartira qidiryapman, 2 xonali, Yunusobod yoki Mirzo Ulug'bek, 500$ gacha. 97 777 88 99", "photos": 0, "expected": {"is_listing": false}}
+{"id": "non-006", "text": "Guruh qoidalari: faqat ko'chmas mulk e'lonlari. Reklama uchun admin bilan bog'laning.", "photos": 0, "expected": {"is_listing": false}}
+{"id": "non-007", "text": "Правила группы: только объявления о недвижимости. Реклама запрещена.", "photos": 0, "expected": {"is_listing": false}}
+{"id": "non-008", "text": "Rahmat, topdim", "photos": 0, "expected": {"is_listing": false}}
+{"id": "non-009", "text": "https://t.me/some_other_channel", "photos": 0, "expected": {"is_listing": false}}
+{"id": "non-010", "text": "Подпишитесь на наш канал, там больше объявлений! t.me/example", "photos": 1, "expected": {"is_listing": false}}
+{"id": "non-011", "text": "Строительные услуги: фундамент, кладка, кровля. Опыт 15 лет. 94 555 66 77", "photos": 4, "expected": {"is_listing": false}}
+{"id": "non-012", "text": "Ipoteka rasmiylashtirish bo'yicha maslahat beramiz, arzon foiz. 90 909 09 09", "photos": 0, "expected": {"is_listing": false}}
+{"id": "non-013", "text": "Кто знает сколько стоит квартира в Юнусабаде?", "photos": 0, "expected": {"is_listing": false}}
+{"id": "non-014", "text": "Bu uy qancha turadi?", "photos": 0, "expected": {"is_listing": false}}
+{"id": "non-015", "text": "ok", "photos": 0, "expected": {"is_listing": false}}
+{"id": "non-016", "text": "Услуги грузчиков, перевозка мебели по Ташкенту. Недорого. 99 888 77 66", "photos": 2, "expected": {"is_listing": false}}
+{"id": "non-017", "text": "Дизайн интерьера квартир и домов, 3D визуализация. 91 234 56 78", "photos": 6, "expected": {"is_listing": false}}
+{"id": "non-018", "text": "Ищу квартиру в аренду, 1 комната, Сергели, до 250 долларов. 88 123 45 67", "photos": 0, "expected": {"is_listing": false}}
+{"id": "non-019", "text": "Добрый вечер, подскажите пожалуйста", "photos": 0, "expected": {"is_listing": false}}
+{"id": "non-020", "text": "Кредит под залог недвижимости, быстро и без справок. 90 111 22 33", "photos": 0, "expected": {"is_listing": false}}
+{"id": "non-021", "text": "Salom, kimda bor?", "photos": 0, "expected": {"is_listing": false}}
+{"id": "non-022", "text": "Ko'chirish xizmati, yuk mashinasi va ishchilar bilan. 93 777 11 22", "photos": 3, "expected": {"is_listing": false}}
+{"id": "non-023", "text": "Реклама в нашем канале: 50 000 сум за пост. По рекламе: @admin", "photos": 0, "expected": {"is_listing": false}}
+{"id": "non-024", "text": "Спасибо большое всем за помощь!", "photos": 0, "expected": {"is_listing": false}}
+{"id": "non-025", "text": "Ichki bezak ishlari, gipsokarton, bo'yoq. Tajribali usta. 97 123 45 67", "photos": 5, "expected": {"is_listing": false}}
