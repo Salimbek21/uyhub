@@ -402,8 +402,8 @@ the Mini App can show something real.
 
 Completed 2026-10-29. **The first step that writes to `listings`.**
 
-Six decisions were taken and are written up in `DECISIONS.md` 3.1–3.7; between
-them they close OPEN_QUESTIONS B1, B2, B3, B4, B9 and C5.
+Eight decisions were taken and are written up in `DECISIONS.md` 3.1–3.8;
+between them they close OPEN_QUESTIONS B1, B2, B3, B4, B9 and C5.
 
 ### What was built
 
@@ -434,7 +434,7 @@ replica until a second is measured rather than assumed.
 
 ### Verified
 
-- `make test` — **523 passed** (was 455)
+- `make test` — **527 passed** (was 455)
 - `make lint` — ruff, `mypy --strict`, eslint, tsc clean
 - The five scenarios SPEC's Phase 3 DoD names, each end to end against real
   Postgres, Redis and object storage
@@ -450,6 +450,27 @@ replica until a second is measured rather than assumed.
 Plus: the same photo from five groups stored once, reprocessing a message
 updating rather than duplicating, a suppressed seller never getting a listing,
 and a terser repost never erasing a known field.
+
+End to end on live data: **120 collected posts → 27 listings from 105
+attributions** (3.89 posts per listing), photos readable anonymously from the
+public bucket while the originals stay private.
+
+### What looking at the output found
+
+Both of these passed every test and were only visible once the listings were
+rendered side by side — worth recording because fixtures would not have caught
+either.
+
+1. **Stale titles.** The title is derived from the type, rooms and district,
+   but was built once at creation. A listing born from a terse post kept
+   "3 xonali obyekt" long after a later sighting established it was a flat in
+   Chilonzor. `merge_fields` now rebuilds the title when any of its inputs is
+   filled.
+2. **A guess stored as a fact.** `property_type` was not nullable and defaulted
+   to `apartment`, so 14 posts that never named a type were filed as flats —
+   and, being non-null, could never be corrected by a later sighting. Now
+   `other`, correctable, and inferred from the floor pair where the post gives
+   one (DECISIONS 3.8).
 
 ### Known gaps
 

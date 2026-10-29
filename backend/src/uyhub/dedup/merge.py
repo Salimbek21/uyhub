@@ -21,13 +21,13 @@ from sqlalchemy.ext.asyncio import AsyncSession
 from uyhub.core.clock import now_utc
 from uyhub.core.logging import get_logger
 from uyhub.models.listing import Listing, ListingPhoto, ListingSource, PriceHistory
+from uyhub.parser.normalize import compose_title
 from uyhub.parser.schema import Extraction
 
 log = get_logger(__name__)
 
 FILLABLE_FIELDS = (
     "deal_type",
-    "property_type",
     "rooms",
     "area_m2",
     "land_sotix",
@@ -40,9 +40,20 @@ FILLABLE_FIELDS = (
 )
 """Fields a later sighting may fill in, but never overwrite."""
 
-UNKNOWN_ENUM_FIELDS = ("building_type", "renovation")
-"""These are not null when unknown — they hold an explicit `unknown` member, so
-"is it missing" is a different question for them."""
+TITLE_INPUTS = frozenset(
+    {"property_type", "rooms", "district", "landmark", "area_m2", "land_sotix"}
+)
+"""Filling any of these makes the stored title stale."""
+
+UNKNOWN_ENUM_VALUES = {
+    "building_type": "unknown",
+    "renovation": "unknown",
+    "property_type": "other",
+}
+"""These are not null when unknown — they hold an explicit member saying so, so
+"is it missing" is a different question for them. ``property_type`` is in here
+because it is not nullable: a post that never says what it is lands on ``other``
+and a later sighting that does name the type should correct it."""
 
 
 @dataclass(frozen=True, slots=True)
@@ -98,10 +109,10 @@ def merge_fields(listing: Listing, extraction: Extraction) -> list[str]:
             setattr(listing, name, incoming)
             filled.append(name)
 
-    for name in UNKNOWN_ENUM_FIELDS:
+    for name, unknown in UNKNOWN_ENUM_VALUES.items():
         current = getattr(listing, name)
         incoming = getattr(extraction, name)
-        if current.value == "unknown" and incoming.value != "unknown":
+        if current.value == unknown and incoming is not None and incoming.value != unknown:
             setattr(listing, name, incoming)
             filled.append(name)
 
@@ -126,6 +137,23 @@ def merge_fields(listing: Listing, extraction: Extraction) -> list[str]:
     if extraction.quality_score > listing.quality_score:
         listing.quality_score = extraction.quality_score
         filled.append("quality_score")
+
+    # The title is derived, so it has to follow the fields it is derived from.
+    # Without this a listing born from a terse post keeps the title it was
+    # created with — "3 xonali obyekt" long after a later sighting established
+    # that it is a flat in Chilonzor.
+    if any(field in filled for field in TITLE_INPUTS):
+        retitled = compose_title(
+            property_type=listing.property_type,
+            rooms=listing.rooms,
+            district=listing.district,
+            landmark=listing.landmark,
+            area_m2=listing.area_m2,
+            land_sotix=listing.land_sotix,
+        )
+        if retitled and retitled != listing.title:
+            listing.title = retitled
+            filled.append("title")
 
     return filled
 

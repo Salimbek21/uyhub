@@ -86,7 +86,7 @@ class RegexExtractor:
 
         extraction = RawExtraction(
             deal_type=deal_type,
-            property_type=self._property_type(property_type, land_sotix),
+            property_type=self._property_type(property_type, land_sotix, rooms_floors),
             rooms=rooms_floors.rooms,
             area_m2=rx.find_area_m2(text),
             land_sotix=land_sotix,
@@ -143,12 +143,24 @@ class RegexExtractor:
 
     @staticmethod
     def _property_type(
-        found: PropertyType | None, land_sotix: Decimal | None
+        found: PropertyType | None,
+        land_sotix: Decimal | None,
+        rooms_floors: rx.RoomsFloors,
     ) -> PropertyType | None:
-        """A plot size with no other clue means land."""
-        if found is None and land_sotix is not None:
+        """Infer the type when the post never names it.
+
+        Most rental posts here never write "kvartira" — they write
+        "Xonalar soni: 1Xona 2/4" and leave the rest to the reader. But a
+        storey out of a total only exists in a block of flats: a hovli is
+        never the second of four. A plot size with no other clue means land.
+        """
+        if found is not None:
+            return found
+        if land_sotix is not None:
             return PropertyType.LAND
-        return found
+        if rooms_floors.floor is not None and rooms_floors.floors_total is not None:
+            return PropertyType.APARTMENT
+        return None
 
     @staticmethod
     def _period(text: str, deal_type: DealType | None) -> PricePeriod | None:

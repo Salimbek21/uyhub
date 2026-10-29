@@ -617,6 +617,29 @@ close call, and rule 3 additionally requires a shared phone, the same deal type,
 the same room count and a price within 5% — the text is the last of five
 conditions, not the only one.
 
+### 3.8 An unknown property type is stored as `other`, not assumed to be a flat
+
+**Context.** `listings.property_type` is not nullable and defaulted to
+`apartment`. A post that never said what it was silently became a flat: it
+would answer a user's "apartment" filter on a guess, and because the column was
+never null the merge rule that fills empty fields could never correct it. The
+derived title told the truth — "2 xonali obyekt" — while the column next to it
+said `apartment`, which is how the problem was found.
+
+**Decision.** Default to `other`, the member that already renders as "obyekt",
+and treat it the way `building_type` and `renovation` treat `unknown` — a later
+sighting that does name the type fills it in and the title is rebuilt with it.
+
+Separately, the extractor now infers `apartment` from a storey-out-of-a-total
+(`1Xona 2/4`): a hovli is never the second of four. On the first 120 real posts
+this recovered 10 of the 14 listings that had no type at all; the remaining one
+is a daily-rental hostel, which is genuinely not one of our categories.
+
+**Consequences.** A listing we cannot classify is missing from a type filter
+rather than wrongly present in it — a null is unfilterable, a wrong value is
+visible to the user. The honest count is now 26 flats and 1 unknown out of 27,
+where the old default would have reported 27 flats.
+
 ---
 
 ## Deployment infrastructure (prepared ahead of Phase 8)

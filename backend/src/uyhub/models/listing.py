@@ -56,8 +56,14 @@ class Listing(UuidMixin, TimestampMixin, Base):
     property_type: Mapped[PropertyType] = mapped_column(
         enum_column(PropertyType, "property_type"),
         nullable=False,
-        default=PropertyType.APARTMENT,
+        default=PropertyType.OTHER,
     )
+    """``other`` is the not-yet-known value, like ``building_type``'s ``unknown``.
+
+    It used to default to ``apartment``, which stored a guess as a fact: a post
+    that never says what it is would be filtered as a flat, and the derived
+    title said "obyekt" while the column said "kvartira". A later sighting that
+    does name the type fills it in (see ``dedup.merge``)."""
     rooms: Mapped[int | None] = mapped_column(SmallInteger)
     area_m2: Mapped[Decimal | None] = mapped_column(Numeric(8, 2))
     land_sotix: Mapped[Decimal | None] = mapped_column(Numeric(8, 2))

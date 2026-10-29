@@ -96,28 +96,50 @@ def to_usd(
     return (amount / uzs_per_usd).quantize(Decimal("0.01"))
 
 
-def build_title(extraction: RawExtraction) -> str:
-    """A short Uzbek title, e.g. "3 xonali kvartira, Chilonzor, 75 m²"."""
+def compose_title(
+    *,
+    property_type: PropertyType | None,
+    rooms: int | None,
+    district: District | None,
+    landmark: str | None,
+    area_m2: Decimal | None,
+    land_sotix: Decimal | None,
+) -> str:
+    """A short Uzbek title, e.g. "3 xonali kvartira, Chilonzor, 75 m²".
+
+    Takes loose fields rather than an extraction so a merge can rebuild the
+    title from the listing's current state. A listing created from a terse post
+    and completed by a later one would otherwise keep the title it was born
+    with — "3 xonali obyekt" long after its type became known.
+    """
     parts: list[str] = []
 
-    kind = PROPERTY_NAMES_UZ.get(extraction.property_type or PropertyType.OTHER, "obyekt")
-    if extraction.rooms:
-        parts.append(f"{extraction.rooms} xonali {kind}")
-    else:
-        parts.append(kind.capitalize())
+    kind = PROPERTY_NAMES_UZ.get(property_type or PropertyType.OTHER, "obyekt")
+    parts.append(f"{rooms} xonali {kind}" if rooms else kind.capitalize())
 
-    if extraction.district is not None:
-        parts.append(DISTRICT_NAMES_UZ[extraction.district])
-    elif extraction.landmark:
-        parts.append(extraction.landmark.title())
+    if district is not None:
+        parts.append(DISTRICT_NAMES_UZ[district])
+    elif landmark:
+        parts.append(landmark.title())
 
-    if extraction.area_m2:
-        parts.append(f"{_trim(extraction.area_m2)} m²")
-    elif extraction.land_sotix:
-        parts.append(f"{_trim(extraction.land_sotix)} sotix")
+    if area_m2:
+        parts.append(f"{_trim(area_m2)} m²")
+    elif land_sotix:
+        parts.append(f"{_trim(land_sotix)} sotix")
 
-    title = ", ".join(parts)
-    return title[:TITLE_MAX_LENGTH].rstrip(", ")
+    return ", ".join(parts)[:TITLE_MAX_LENGTH].rstrip(", ")
+
+
+def build_title(extraction: RawExtraction) -> str:
+    """The title for one extraction."""
+    return compose_title(
+        property_type=extraction.property_type,
+        rooms=extraction.rooms,
+        district=extraction.district,
+        landmark=extraction.landmark,
+        area_m2=extraction.area_m2,
+        land_sotix=extraction.land_sotix,
+    )
 
 
 def _trim(value: Decimal) -> str:

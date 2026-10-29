@@ -40,7 +40,7 @@ from uyhub.media.process import (
     fetch_and_process,
     store_derivatives,
 )
-from uyhub.models.enums import ListingStatus
+from uyhub.models.enums import ListingStatus, PropertyType
 from uyhub.models.listing import Listing, ListingPhoto
 from uyhub.models.ops import SuppressedPhone
 from uyhub.models.telegram import RawMessage
@@ -194,7 +194,7 @@ async def _create(
 ) -> Listing:
     listing = Listing(
         deal_type=extraction.deal_type,
-        property_type=extraction.property_type,
+        property_type=extraction.property_type or PropertyType.OTHER,
         rooms=extraction.rooms,
         area_m2=extraction.area_m2,
         land_sotix=extraction.land_sotix,

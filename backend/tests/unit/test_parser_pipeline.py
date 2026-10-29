@@ -252,6 +252,25 @@ class TestRealPostFormats:
         assert result.extraction.rooms == 2
         assert (result.extraction.floor, result.extraction.floors_total) == (6, 10)
 
+    def test_a_storey_out_of_a_total_means_a_flat(self, settings: Settings) -> None:
+        """14 of the first 120 real posts never named the property type.
+
+        Ten of them wrote the floor pair, and nothing else is ever described
+        as the second of four — a hovli has no building to be a storey of.
+        """
+        result = parse(
+            "Kimlar uchun: Oilaga\nManzil: Sergeli\nXonalar soni: 1Xona 2/4\nNarx: 350$",
+            settings=settings,
+        )
+        assert result.extraction is not None
+        assert result.extraction.property_type is PropertyType.APARTMENT
+
+    def test_a_post_that_names_nothing_keeps_the_type_unknown(self, settings: Settings) -> None:
+        """The inference is a signal, not a blanket assumption."""
+        result = parse("Yunusobod, kunlik hostel joy bor. Narx: 100 000 so'm", settings=settings)
+        assert result.extraction is not None
+        assert result.extraction.property_type is None
+
     def test_enabling_the_llm_without_one_built_fails_loudly(
         self, monkeypatch: pytest.MonkeyPatch
     ) -> None:

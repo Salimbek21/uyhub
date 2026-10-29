@@ -656,6 +656,93 @@ async def test_a_suppressed_seller_never_gets_a_listing(
     assert await count_listings(session_factory) == 0
 
 
+async def test_the_title_follows_the_fields_a_merge_fills_in(
+    session_factory: async_sessionmaker[AsyncSession],
+    redis_client: Redis,
+    sources: list[Source],
+    settings: Settings,
+) -> None:
+    """Found on real data: listings read "3 xonali obyekt" in the feed long
+    after a later sighting had established they were flats in Chilonzor.
+
+    The title is derived, so it has to be rebuilt when its inputs are.
+    """
+    vague = extraction(settings).model_copy(
+        update={"property_type": None, "district": None, "area_m2": None}
+    )
+    vague = vague.model_copy(update={"title": "3 xonali obyekt"})
+
+    first_id, media = await store_message(session_factory, sources[0], tg_message_id=1000)
+    async with session_factory() as session:
+        await assemble(
+            session,
+            redis_client,
+            raw_message_id=first_id,
+            source_id=sources[0].id,
+            tg_link=None,
+            extraction=vague,
+            media=media,
+            settings=settings,
+        )
+        await session.commit()
+
+    async with session_factory() as session:
+        assert (await session.execute(select(Listing))).scalar_one().title == "3 xonali obyekt"
+
+    second_id, media = await store_message(session_factory, sources[1], tg_message_id=1001)
+    async with session_factory() as session:
+        await assemble(
+            session,
+            redis_client,
+            raw_message_id=second_id,
+            source_id=sources[1].id,
+            tg_link=None,
+            extraction=extraction(settings),
+            media=media,
+            settings=settings,
+        )
+        await session.commit()
+
+    async with session_factory() as session:
+        listing = (await session.execute(select(Listing))).scalar_one()
+
+    assert listing.property_type is PropertyType.APARTMENT
+    assert listing.district is District.CHILONZOR
+    assert listing.title == "3 xonali kvartira, Chilonzor, 75 m²"
+
+
+async def test_an_unnamed_property_type_is_stored_as_unknown_not_guessed(
+    session_factory: async_sessionmaker[AsyncSession],
+    redis_client: Redis,
+    sources: list[Source],
+    settings: Settings,
+) -> None:
+    """The column is not nullable and used to default to ``apartment``, so a
+    post that never said what it was became a flat in the filters — a guess
+    stored as a fact, and the reason the title said "obyekt" while the column
+    said "kvartira"."""
+    vague = extraction(settings).model_copy(update={"property_type": None})
+
+    raw_id, media = await store_message(session_factory, sources[0], tg_message_id=1100)
+    async with session_factory() as session:
+        await assemble(
+            session,
+            redis_client,
+            raw_message_id=raw_id,
+            source_id=sources[0].id,
+            tg_link=None,
+            extraction=vague,
+            media=media,
+            settings=settings,
+        )
+        await session.commit()
+
+    async with session_factory() as session:
+        listing = (await session.execute(select(Listing))).scalar_one()
+
+    assert listing.property_type is PropertyType.OTHER
+
+
 async def test_a_merge_never_overwrites_a_known_field_with_nothing(
     session_factory: async_sessionmaker[AsyncSession],
     redis_client: Redis,
