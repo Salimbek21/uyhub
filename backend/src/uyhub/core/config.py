@@ -94,6 +94,24 @@ class Settings(BaseSettings):
         alias="CBU_API_URL",
     )
 
+    # -- Dedup and lifecycle -------------------------------------------------
+    dedup_lookback_days: int = Field(default=60, ge=1, le=365, alias="DEDUP_LOOKBACK_DAYS")
+    """How far back a repost can match an existing listing (SPEC 7.1)."""
+
+    dedup_simhash_max_distance: int = Field(
+        default=12, ge=0, le=64, alias="DEDUP_SIMHASH_MAX_DISTANCE"
+    )
+    """SPEC 7.1 suggests 6. Measured on real posts, a repost of the same flat
+    with the usual small edits lands at 9 bits while a different flat is 26, so
+    6 would never fire. SPEC calls these config values; see DECISIONS 3.7."""
+    dedup_phash_max_distance: int = Field(default=6, ge=0, le=64, alias="DEDUP_PHASH_MAX_DISTANCE")
+    dedup_price_tolerance_pct: float = Field(
+        default=5.0, ge=0.0, le=100.0, alias="DEDUP_PRICE_TOLERANCE_PCT"
+    )
+
+    listing_ttl_days_sale: int = Field(default=30, ge=1, le=365, alias="LISTING_TTL_DAYS_SALE")
+    listing_ttl_days_rent: int = Field(default=14, ge=1, le=365, alias="LISTING_TTL_DAYS_RENT")
+
     # -- Observability -------------------------------------------------------
     sentry_dsn: SecretStr | None = Field(default=None, alias="SENTRY_DSN")
 

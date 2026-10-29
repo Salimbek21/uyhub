@@ -198,6 +198,16 @@ services:
       resources:
         limits: {memory: 768M}
 
+  # Exchange rates, listing expiry, suppression enforcement, trust scores.
+  # One replica by definition: two would run every job twice.
+  scheduler:
+    <<: *backend
+    command: ["scheduler"]
+    deploy:
+      replicas: 1
+      resources:
+        limits: {memory: 384M}
+
   # Later phases. Each is a working entrypoint today but has no real loop yet,
   # so they are left out of the default set rather than burning a container each.
   # bot:

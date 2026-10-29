@@ -519,6 +519,106 @@ and again when the LLM extractor lands.
 
 ---
 
+## Phase 3 — Dedup, media and lifecycle
+
+### 3.1 `price_usd` is frozen at first sight, not recomputed daily
+
+**Context.** Half of listings quote so'm, and the CBU rate moves every day. A
+listing's dollar price could track the rate or be fixed when first read.
+
+**Decision.** Computed once, when the seller's posted price is first seen, and
+recomputed only when the seller posts a different number.
+
+**Consequences.** `price_history` contains only real price changes, so a
+"price dropped" notification means the seller dropped the price — not that the
+so'm moved half a percent overnight. The cost is drift: a so'm listing held for
+months carries a slightly stale dollar figure. That is the better failure,
+because the alternative floods every watcher with false alarms. Closes
+OPEN_QUESTIONS B3.
+
+### 3.2 The perceptual hash is ours, not `imagehash`
+
+**Context.** SPEC 7.3 names `imagehash`. It depends on scipy and PyWavelets —
+about 150 MB of container image for one function, built on a VPS.
+
+**Decision.** The same algorithm in forty lines of Pillow and numpy: greyscale,
+32x32, DCT-II as a matrix product, the top-left 8x8 block, each bit set by
+comparison with the median.
+
+**Consequences.** The properties the library would have guaranteed are asserted
+directly instead: identical images hash identically, a copy resized to 400px
+and recompressed at JPEG quality 70 differs by **0 bits**, and a different
+photograph differs by 14. Swapping `imagehash` back in later is one function.
+
+### 3.3 Without a phone there is no `dedup_key`
+
+**Context.** SPEC 7.1 builds the exact-match key from `phone_hash_sorted[0]`.
+Many posts have no phone at all.
+
+**Decision.** The key is `None` when there is no phone, and matching falls
+through to rules 3 and 4.
+
+**Consequences.** Two genuinely different three-room flats in Chilonzor at the
+same price no longer collapse into one listing. The cost is more duplicates
+among phone-less posts, which is the right trade: a missed merge is untidy, a
+wrong merge shows a user a price belonging to a different flat. Closes
+OPEN_QUESTIONS B1.
+
+### 3.4 The longest description wins a merge
+
+**Context.** SPEC 7.2 says to keep "the most complete text" without defining
+completeness.
+
+**Decision.** The longest one.
+
+**Consequences.** Objective and needs no trust ranking between sources. It can
+pick a chattier post over a denser one; in exchange nothing has to decide which
+group is more reliable. Closes OPEN_QUESTIONS B9.
+
+### 3.5 Assembly is serialised per seller by an advisory lock
+
+**Context.** SPEC specifies idempotency per `raw_message_id`, which does not
+protect the merge path: two workers handling two reposts of the same flat both
+find no match and both create a listing.
+
+**Decision.** `pg_advisory_xact_lock` keyed on the seller's first phone hash,
+held for the assembling transaction. A post with no phone takes no lock — there
+is nothing to collide on, and rule 2 already declines to match it.
+
+**Consequences.** Work on different sellers still runs in parallel. This is what
+makes a second parser replica safe; the prod compose still runs one until that
+has been measured rather than assumed. Closes OPEN_QUESTIONS C5.
+
+### 3.6 `trust_score` is the share of a source's posts that become listings
+
+**Context.** SPEC 3 stores the field and feeds it into `quality_score`, but
+nothing ever computed it.
+
+**Decision.** A scheduler job sets it to `listings / messages` for sources with
+at least 20 messages, floored at 0.3.
+
+**Consequences.** A property channel scores near 1, a chat group near the floor,
+and the difference shows up in the feed ordering. The floor matters because the
+score multiplies into quality, which gates channel posting — a source should
+never be silenced by one bad week. Closes OPEN_QUESTIONS B4.
+
+### 3.7 The text-similarity threshold is 12 bits, not 6
+
+**Context.** SPEC 7.1 rule 3 suggests a SimHash Hamming distance of 6.
+
+**Measurement.** On real collected posts, a repost of the same flat with the
+usual edits — one word changed, a line dropped — sits at **9 bits**, while a
+different flat sits at **26**. At 6 the rule would never fire.
+
+**Decision.** Default 12, configurable, with the measurement recorded here.
+
+**Consequences.** The gap between 9 and 26 is wide enough that 12 is not a
+close call, and rule 3 additionally requires a shared phone, the same deal type,
+the same room count and a price within 5% — the text is the last of five
+conditions, not the only one.
+
+---
+
 ## Deployment infrastructure (prepared ahead of Phase 8)
 
 Built early because the product owner needs a public HTTPS URL: Telegram refuses to

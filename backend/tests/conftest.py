@@ -212,7 +212,15 @@ async def redis_client(settings: Settings) -> AsyncIterator[Redis]:
 
 @pytest.fixture
 async def s3_bucket(settings: Settings, request: pytest.FixtureRequest) -> AsyncIterator[str]:
-    """A bucket unique to this test, emptied and removed afterwards."""
+    """A bucket unique to this test, emptied and removed afterwards.
+
+    Creation tolerates the bucket already existing. A run that is interrupted —
+    or a storage backend that is lazy about deletion — would otherwise leave a
+    bucket behind that fails every subsequent run with ``BucketAlreadyOwnedByYou``,
+    which is a confusing way to learn that the last run was killed.
+    """
+    from botocore.exceptions import ClientError
+
     from uyhub.core.s3 import s3_client
 
     raw = request.node.name.lower()
@@ -220,7 +228,16 @@ async def s3_bucket(settings: Settings, request: pytest.FixtureRequest) -> Async
     bucket = f"test-{safe}"[:62].rstrip("-")
 
     async with s3_client(settings) as client:
-        await client.create_bucket(Bucket=bucket)
+        try:
+            await client.create_bucket(Bucket=bucket)
+        except ClientError as exc:
+            code = exc.response.get("Error", {}).get("Code", "")
+            if code not in {"BucketAlreadyOwnedByYou", "BucketAlreadyExists"}:
+                raise
+            listed = await client.list_objects_v2(Bucket=bucket)
+            for obj in listed.get("Contents", []):
+                if key := obj.get("Key"):
+                    await client.delete_object(Bucket=bucket, Key=key)
         try:
             yield bucket
         finally:

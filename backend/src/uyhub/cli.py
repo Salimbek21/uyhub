@@ -182,9 +182,25 @@ def poster() -> None:
 
 @app.command()
 def scheduler() -> None:
-    """Run periodic jobs. Implemented in Phase 2 onwards."""
-    _bootstrap("scheduler")
-    asyncio.run(run_until_stopped("scheduler"))
+    """Run periodic jobs: exchange rates, listing expiry, suppressions, trust."""
+    from uyhub.core.db import dispose_engine, get_sessionmaker
+    from uyhub.core.redis import close_redis, get_redis
+    from uyhub.scheduler.runner import run_scheduler
+
+    settings = _bootstrap("scheduler")
+
+    async def _run() -> None:
+        try:
+            await run_scheduler(
+                session_factory=get_sessionmaker(settings),
+                redis=get_redis(settings),
+                settings=settings,
+            )
+        finally:
+            await dispose_engine()
+            await close_redis()
+
+    asyncio.run(_run())
 
 
 @app.command(name="init-storage")

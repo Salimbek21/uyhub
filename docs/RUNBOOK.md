@@ -259,6 +259,99 @@ retention has already purged are skipped — they cannot be reparsed
 synthetic and was written alongside the parser. Treat the number as a regression
 signal until real anonymised posts replace it (docs/DECISIONS.md 2.6).
 
+## 3c. Listings, duplicates and photos
+
+The parser now also assembles listings. One post either joins a listing that
+exists or becomes a new one; its photos become public webp; the result is
+announced on `stream:listings`.
+
+### Is it working?
+
+```sql
+SELECT status, count(*) FROM listings GROUP BY status;
+
+-- How much deduplication is actually happening. A healthy number here is well
+-- above 1.0 once several sources are live; 1.0 means nothing is merging.
+SELECT round(count(*)::numeric / nullif(count(DISTINCT listing_id), 0), 2) AS posts_per_listing
+  FROM listing_sources;
+
+-- Listings with no photo are the ones that look worst in the feed.
+SELECT count(*) FILTER (WHERE p.id IS NULL) AS without_photos, count(*) AS total
+  FROM listings l LEFT JOIN listing_photos p ON p.listing_id = l.id;
+```
+
+```bash
+redis-cli XLEN stream:listings     # events waiting for the bot and poster
+```
+
+### Too many duplicates, or wrongly merged listings
+
+The thresholds are environment variables; nothing needs rebuilding.
+
+| Variable | Raise it when | Lower it when |
+|---|---|---|
+| `DEDUP_SIMHASH_MAX_DISTANCE` | the same flat appears twice with near-identical text | two different flats merged |
+| `DEDUP_PHASH_MAX_DISTANCE` | the same photo is not recognised across groups | listings merged that share only a generic photo |
+| `DEDUP_PRICE_TOLERANCE_PCT` | a repost at a slightly different price made a second listing | flats at genuinely different prices merged |
+| `DEDUP_LOOKBACK_DAYS` | old listings are reposted and duplicate | — |
+
+**Which direction to err.** A missed merge shows the same flat twice, which is
+untidy. A wrong merge shows a price that belongs to a different flat, which is
+wrong in the user's face. When unsure, tighten.
+
+To see why two posts merged, the rule is in the logs:
+
+```bash
+docker compose -f infra/docker-compose.prod.yml --env-file .env \
+  logs parser | grep dedup.matched
+```
+
+After changing a threshold, re-run the affected history:
+
+```bash
+uyhub reparse --since 2026-10-01 --limit 5000
+```
+
+Reparse is safe to repeat: a message that already produced a listing updates
+that listing rather than creating another.
+
+### Removing a listing at the seller's request
+
+Phone numbers are stored only as keyed hashes, so suppression works on the
+hash. The bot command for this arrives in Phase 6; until then:
+
+```sql
+-- The hash is in listings.phone_hashes for the listing in question.
+INSERT INTO suppressed_phones (phone_hash, reason)
+SELECT unnest(phone_hashes), 'seller_request' FROM listings WHERE id = '<uuid>';
+```
+
+The scheduler enforces it within fifteen minutes, across every listing that
+phone appears on — including ones collected before the request. Removal is
+terminal: nothing brings the listing back automatically.
+
+### Photos
+
+Originals stay private in `uyhub-raw`. The public `large` (1280px) and `thumb`
+(400px) webp live in `uyhub-media` under `listings/{listing_id}/`, with EXIF
+stripped — a phone's EXIF routinely carries GPS coordinates.
+
+A photo that fails to process is skipped and logged as
+`media.unreadable_image`; the listing is still created. If many fail, check
+that `uyhub-raw` still holds the originals — the collector writes them, and
+nothing else does.
+
+### The scheduler
+
+```bash
+uyhub scheduler        # rates, expiry, suppressions, trust scores
+```
+
+Every job runs once at startup, so a restart catches up whatever was missed
+rather than waiting out an interval. A job that fails is logged as
+`scheduler.job_failed` and the others still run — a cbu.uz outage must not stop
+listings from expiring.
+
 ## 4. Deployment
 
 ### 4.1 What to buy

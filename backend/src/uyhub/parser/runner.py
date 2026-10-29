@@ -15,6 +15,7 @@ import asyncio
 import contextlib
 from dataclasses import dataclass
 from decimal import Decimal
+from typing import Any
 
 from redis.asyncio import Redis
 from sqlalchemy import select, update
@@ -32,6 +33,7 @@ from uyhub.core.streams import (
     ensure_group,
     read_group,
 )
+from uyhub.dedup.assemble import AssembleResult, assemble
 from uyhub.models.enums import Currency, RawMessageStatus
 from uyhub.models.telegram import RawMessage, Source
 from uyhub.parser.extractor import Extractor
@@ -54,13 +56,29 @@ class MessageContext:
     text: str
     photo_count: int
     source_trust: float
+    source_id: int
+    media: list[dict[str, Any]]
+    tg_link: str | None
+    """Where the post can be read, or ``None`` for a private chat. This is the
+    attribution the Mini App shows instead of a phone number (DECISIONS P.2)."""
+
+    deleted: bool
 
 
 async def load_context(session: AsyncSession, raw_message_id: int) -> MessageContext | None:
-    """Read one message and its source's trust score."""
+    """Read one message, its media and its source."""
     row = (
         await session.execute(
-            select(RawMessage.id, RawMessage.text, RawMessage.media, Source.trust_score)
+            select(
+                RawMessage.id,
+                RawMessage.text,
+                RawMessage.media,
+                RawMessage.tg_message_id,
+                RawMessage.deleted_at,
+                RawMessage.source_id,
+                Source.trust_score,
+                Source.username,
+            )
             .join(Source, Source.id == RawMessage.source_id)
             .where(RawMessage.id == raw_message_id)
         )
@@ -68,12 +86,19 @@ async def load_context(session: AsyncSession, raw_message_id: int) -> MessageCon
     if row is None:
         return None
 
-    photos = [item for item in (row.media or []) if item.get("kind") == "photo"]
+    media = list(row.media or [])
+    photos = [item for item in media if item.get("kind") == "photo"]
+    link = f"https://t.me/{row.username}/{row.tg_message_id}" if row.username else None
+
     return MessageContext(
         raw_message_id=row.id,
         text=row.text or "",
         photo_count=len(photos),
         source_trust=float(row.trust_score),
+        source_id=row.source_id,
+        media=media,
+        tg_link=link,
+        deleted=row.deleted_at is not None,
     )
 
 
@@ -170,6 +195,11 @@ class ParserWorker:
                 settings=self._settings,
             )
             await store_result(session, raw_message_id, result, self._settings.parser_version)
+
+            # Parsing and assembling share one transaction. A listing that
+            # exists without the message that produced it being marked parsed
+            # would be reassembled on the next pass and counted twice.
+            assembled = await self._assemble(session, context, result)
             await session.commit()
 
         log.info(
@@ -178,6 +208,34 @@ class ParserWorker:
             status=result.status.value,
             reject_reason=result.reject_reason,
             quality=result.extraction.quality_score if result.extraction else None,
+            listing_id=assembled.listing_id if assembled else None,
+            listing_event=assembled.event if assembled else None,
+        )
+
+    async def _assemble(
+        self, session: AsyncSession, context: MessageContext, result: ParseResult
+    ) -> AssembleResult | None:
+        """Fold the parsed message into a listing (SPEC 7).
+
+        A deleted message is parsed but never assembled: it would resurrect a
+        listing the lifecycle job is about to retire. The deletion itself is
+        handled there, not here.
+        """
+        if result.extraction is None or not result.extraction.is_listing:
+            return None
+        if context.deleted:
+            log.info("parser.skipped_deleted", raw_message_id=context.raw_message_id)
+            return None
+
+        return await assemble(
+            session,
+            self._redis,
+            raw_message_id=context.raw_message_id,
+            source_id=context.source_id,
+            tg_link=context.tg_link,
+            extraction=result.extraction,
+            media=context.media,
+            settings=self._settings,
         )
 
     async def _on_failure(self, message: StreamMessage, exc: Exception) -> None:

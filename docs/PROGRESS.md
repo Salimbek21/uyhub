@@ -395,3 +395,80 @@ rather than invention.
 Phase 3 — dedup, media processing and the listing lifecycle. That is the step
 that first produces rows in `listings`, and therefore the first point at which
 the Mini App can show something real.
+
+---
+
+## Phase 3 — Dedup, media and lifecycle ✅
+
+Completed 2026-10-29. **The first step that writes to `listings`.**
+
+Six decisions were taken and are written up in `DECISIONS.md` 3.1–3.7; between
+them they close OPEN_QUESTIONS B1, B2, B3, B4, B9 and C5.
+
+### What was built
+
+**`media/`** — `phash.py` computes a 64-bit perceptual hash in forty lines of
+Pillow and numpy rather than pulling scipy and PyWavelets in behind
+`imagehash` (3.2). `process.py` turns an original into a 1280px `large` and a
+400px `thumb` webp with EXIF stripped, and is deliberately split into a pure
+function over bytes and a separate storage step — dedup needs the hash before
+it knows which listing the photo belongs to.
+
+**`dedup/`** — `fingerprint.py` (the exact key and a SimHash, both on blake2b
+so they survive a restart), `matcher.py` (SPEC 7.1's four rules in order),
+`merge.py` (fill-never-overwrite, price history, photo dedup by sha256) and
+`assemble.py`, the orchestrator.
+
+**`lifecycle.py`** — the four states and their transitions, including the rule
+that a deleted post does not retire a listing until every source has dropped it
+*and* three days have passed. Deleting and reposting is how these groups bump a
+listing; acting on the first deletion would retire half the feed every evening.
+
+**`scheduler/`** — `uyhub scheduler` was an empty loop; it now runs four jobs
+(rates, suppressions, expiry, trust scores), each once at startup so a restart
+is a catch-up, and none of which can take the service down.
+
+**Wiring.** The parser worker now assembles after it parses, in the same
+transaction. `scheduler` is live in the prod compose; `parser` still runs one
+replica until a second is measured rather than assumed.
+
+### Verified
+
+- `make test` — **523 passed** (was 455)
+- `make lint` — ruff, `mypy --strict`, eslint, tsc clean
+- The five scenarios SPEC's Phase 3 DoD names, each end to end against real
+  Postgres, Redis and object storage
+
+| Scenario | Result |
+|---|---|
+| The same flat in five groups | 1 listing, 5 attributions, `created` then four `updated` |
+| One realtor, three different flats | 3 listings — the negative case that matters most |
+| A repost at a lower price | 1 listing, a `price_history` row, version bumped |
+| An edit saying "sotildi" | `sold`, `status_changed` emitted |
+| Deleted and reposted | fresh deletion ignored; an old one with every source gone expires |
+
+Plus: the same photo from five groups stored once, reprocessing a message
+updating rather than duplicating, a suppressed seller never getting a listing,
+and a terser repost never erasing a known field.
+
+### Known gaps
+
+1. **Nothing reads `listings` yet.** The API is Phase 4, so the Mini App still
+   shows mock data even though the table is now populated.
+2. **One parser replica.** The advisory lock makes a second safe in principle;
+   it has not been run.
+3. **Dedup is unmeasured on scale.** The rules are right on fixtures and on one
+   source's real posts. The duplicate rate SPEC 1.5 asks about (<5%) needs
+   several sources and a manual sample of a hundred listings.
+4. **Backfill is still slow** — photos download sequentially while live
+   ingestion is concurrent. Noticeable on a first join, harmless afterwards.
+5. **Rule 4 scans candidates in Python.** Narrowed by deal type, room count and
+   the lookback window, and capped at 200 rows with a warning when hit, but
+   Hamming distance over a bigint is not something Postgres can index. Worth
+   revisiting if the candidate-limit warning ever appears.
+
+### Next steps
+
+Phase 4 — the API. `/v1/listings` with filters and cursor pagination, plus
+`initData` authentication, which is the first thing that needs a `BOT_TOKEN`
+from the product owner.
