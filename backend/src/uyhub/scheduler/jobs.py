@@ -23,6 +23,7 @@ from sqlalchemy.ext.asyncio import AsyncSession, async_sessionmaker
 from uyhub import lifecycle
 from uyhub.core.config import Settings
 from uyhub.core.logging import get_logger
+from uyhub.media.prune import prune_originals, prune_orphans
 from uyhub.rates.cbu import CbuRateProvider, RateProvider
 from uyhub.rates.store import save_rate
 
@@ -63,6 +64,18 @@ async def update_trust_scores(session: AsyncSession) -> int:
     return await lifecycle.recompute_trust_scores(session)
 
 
+async def prune_media(session: AsyncSession, settings: Settings) -> int:
+    """Reclaim the disk held by originals nobody will read again.
+
+    Two passes, because the originals fall into two groups: those a listing
+    claimed and has finished with, and the far larger set that no listing ever
+    claimed at all.
+    """
+    converted = await prune_originals(session, settings=settings)
+    orphaned = await prune_orphans(session, settings=settings)
+    return converted.deleted + orphaned.deleted
+
+
 def build_jobs(
     *,
     session_factory: async_sessionmaker[AsyncSession],
@@ -91,6 +104,12 @@ def build_jobs(
             await session.commit()
             return count
 
+    async def _prune() -> int:
+        async with session_factory() as session:
+            count = await prune_media(session, settings)
+            await session.commit()
+            return count
+
     async def _trust() -> int:
         async with session_factory() as session:
             count = await update_trust_scores(session)
@@ -103,6 +122,10 @@ def build_jobs(
         Job("suppressions", timedelta(minutes=15), _suppress),
         Job("expiry", timedelta(hours=1), _expire),
         Job("trust_scores", timedelta(hours=12), _trust),
+        # Disk is the binding cost on a small server, and this is the job that
+        # keeps it bounded. Often enough that a backlog never builds, rare
+        # enough that it is never competing with ingestion.
+        Job("media_prune", timedelta(hours=6), _prune),
     ]
 
 

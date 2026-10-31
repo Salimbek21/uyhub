@@ -235,8 +235,29 @@ class ListingPhoto(IdMixin, Base):
     phash: Mapped[int | None] = mapped_column(BigInteger)
     sha256: Mapped[str] = mapped_column(String(64), nullable=False)
 
+    created_at: Mapped[datetime] = mapped_column(
+        DateTime(timezone=True), nullable=False, server_default=func.now()
+    )
+    """When the photo was stored. This is what the retention window counts."""
+
+    original_pruned_at: Mapped[datetime | None] = mapped_column(DateTime(timezone=True))
+    """When the full-size original was deleted to reclaim disk, or NULL while it
+    is still there. The derivatives are unaffected and `s3_key_original` is kept
+    so the record of where the file was does not disappear with it.
+
+    This column, not the bucket, is the record of what has been reclaimed — it
+    is what stops a second run re-deleting the same keys (docs/DECISIONS.md 6.3)."""
+
     __table_args__ = (
         UniqueConstraint("listing_id", "sha256", name="uq_listing_photos_listing_sha256"),
+        # The prune job's query: oldest first, among those not yet reclaimed.
+        # Partial, because the reclaimed rows are the ones it never looks at and
+        # they are eventually almost all of them.
+        Index(
+            "ix_listing_photos_prunable",
+            "created_at",
+            postgresql_where=text("original_pruned_at IS NULL"),
+        ),
         Index("ix_listing_photos_listing_position", "listing_id", "position"),
     )
 

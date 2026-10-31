@@ -857,3 +857,50 @@ internet**. Only 401 proves the route exists *and* authentication is switched
 on. It is the one assertion that catches a misconfigured `BOT_TOKEN` or a
 stray `API_ALLOW_INSECURE_AUTH=true` before users do; `deploy.sh` refuses the
 latter earlier still.
+
+### 6.3 Original photos are deleted after seven days
+
+**Context.** Looking for a cheaper server, the measurement that mattered turned
+out to be disk, not RAM. On the first 120 collected posts: 655 MB of object
+storage against a 10 MB database, and **84% of it was originals** — full-size
+files downloaded from Telegram, converted to webp once, never read again. They
+are never served; the Mini App only ever loads derivatives.
+
+Worse, three quarters of those originals belonged to **nothing at all**: 934
+downloaded against 229 rows in `listing_photos`. The collector downloads every
+photo of every message, but a photo only gets a row if its message became a
+listing *and* the photo survived deduplication and the fifteen-per-listing cap.
+Cross-posts of the same flat, prefilter rejections and overflow past the cap
+all leave their originals behind forever.
+
+Extrapolated from the two live sources, thirty sources would add roughly 4 GB
+of originals a day. That is what fills a disk, and disk is what makes a VPS
+expensive.
+
+**Decision.** `MEDIA_ORIGINAL_RETENTION_DAYS` (default 7), enforced by a
+scheduler job in two passes: originals a listing has finished with, and
+originals no listing ever claimed. Derivatives are never touched.
+
+**Why seven days and not zero.** The window buys exactly one thing: if the
+conversion pipeline is wrong — bad dimensions, a stripped colour profile, a bug
+in the perceptual hash — there is a week in which it can be rerun from the
+originals. After that nobody is going to, and the bytes are pure cost.
+
+**Consequences.** This is the only code in the system that destroys data
+irreversibly, so two rules are enforced rather than assumed, and both were
+exercised against live data: an original whose derivative was never written is
+**never** deleted however old it is, because then the original is the only copy
+of the picture; and the job is idempotent — `listing_photos.original_pruned_at`
+is the record of what has been reclaimed, so a second run deletes nothing.
+
+Verified on the development stack: within the window, nothing was deleted; with
+the window passed, 228 converted originals went and 1 unconverted one was
+protected; a rerun deleted nothing; the media bucket was untouched at 101.1 MB
+throughout and the feed still served its photos. The orphan pass identifies 705
+objects (443.7 MB) while protecting every original a listing still points at.
+
+**Still true afterwards.** At steady state the disk holds seven days of
+originals. With two sources that is a couple of gigabytes; at thirty it is
+nearer thirty, which is the point at which the retention window should be
+reconsidered — or the collector taught not to download a photo it has already
+seen, which would be the real fix.

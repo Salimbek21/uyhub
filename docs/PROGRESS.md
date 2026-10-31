@@ -690,6 +690,38 @@ every required variable, 4.4 adds the post-deploy checks that catch a silently
 open API or publicly served originals, and section 6 documents backup and
 restore.
 
+### Disk, not RAM, is the cost
+
+Asked how to run on a cheaper server, the useful answer came from measuring
+rather than guessing.
+
+**Memory is a non-issue.** Postgres 90 MB, SeaweedFS 268 MB, Redis 15 MB; with
+the four Python services roughly 1.5 GB total. A 4 GB machine is comfortable
+and the 8 GB tier SPEC 16 suggests is not needed yet.
+
+**Disk is the whole problem.** On 120 posts: 655 MB of object storage against a
+10 MB database, and 84% of the bytes were full-size originals that are never
+served. Three quarters of those belonged to no listing at all — 934 downloaded
+against 229 attached, because every photo of every message is downloaded while
+only deduplicated, under-the-cap photos of messages that became listings get a
+row. Thirty sources would add roughly 4 GB a day.
+
+`media/prune.py` plus a 6-hourly scheduler job now deletes originals older than
+`MEDIA_ORIGINAL_RETENTION_DAYS` (default 7) in two passes — claimed and
+orphaned. Derivatives are never touched (DECISIONS 6.3).
+
+Exercised against live data, since this is the only code that destroys data
+irreversibly: inside the window nothing was deleted; past it, 228 converted
+originals went and 1 unconverted one was protected; a rerun deleted nothing;
+the media bucket stayed at 101.1 MB and the feed still served its photos. The
+orphan pass identifies 705 objects (443.7 MB) while protecting everything a
+listing points at.
+
+**Hosting abroad is not a cost lever.** 107 of 120 collected posts carry a
+phone number in plaintext in `raw_messages.text`. "We only store hashes" is
+true of `listings` and of nothing else, so SPEC 13's requirement that the data
+stay in Uzbekistan applies in full.
+
 ### What is still missing
 
 1. **Backups sit on the same machine as the database.** Protects against a

@@ -147,6 +147,16 @@ class Settings(BaseSettings):
         default=5.0, ge=0.0, le=100.0, alias="DEDUP_PRICE_TOLERANCE_PCT"
     )
 
+    media_original_retention_days: int = Field(
+        default=7, ge=1, le=3650, alias="MEDIA_ORIGINAL_RETENTION_DAYS"
+    )
+    """How long full-size originals are kept before the disk is reclaimed.
+
+    Originals are 84% of stored bytes and are never served — only the webp
+    derivatives are. The window exists so a broken conversion can be rerun;
+    after it, the original is deleted and that is irreversible
+    (docs/DECISIONS.md 6.3)."""
+
     listing_ttl_days_sale: int = Field(default=30, ge=1, le=365, alias="LISTING_TTL_DAYS_SALE")
     listing_ttl_days_rent: int = Field(default=14, ge=1, le=365, alias="LISTING_TTL_DAYS_RENT")
 

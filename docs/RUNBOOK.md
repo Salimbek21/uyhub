@@ -683,6 +683,37 @@ docker compose -f infra/docker-compose.prod.yml exec postgres \
 The dump is taken with `--clean --if-exists`, so step 4 replaces the schema and
 data in place; the database does not need to be dropped first.
 
+### Reclaiming disk
+
+Disk, not memory, is what a small server runs out of. Measured on real data,
+originals were 84% of stored bytes and three quarters of them belonged to no
+listing at all.
+
+The scheduler's `media_prune` job runs every 6 hours and deletes originals
+older than `MEDIA_ORIGINAL_RETENTION_DAYS` (default 7) in two passes: those a
+listing has finished with, and those no listing ever claimed. Derivatives — the
+only photos ever served — are never touched.
+
+```bash
+docker compose -f infra/docker-compose.prod.yml logs scheduler | grep -E 'pruned|prune_skipped'
+```
+
+`media.prune_skipped_unprocessed` means originals were found with no derivative
+written. They are never deleted — the original is then the only copy of the
+photo — but a count that keeps growing means the conversion pipeline is failing
+and should be investigated.
+
+If disk still grows faster than expected, check the split before changing the
+retention window:
+
+```bash
+docker compose -f infra/docker-compose.prod.yml exec seaweedfs du -sh /data
+```
+
+Shortening the window reclaims more but leaves less room to rerun a broken
+conversion. The better fix at scale is for the collector not to download a
+photo it has already seen — see DECISIONS 6.3.
+
 ### Still missing
 
 The dumps live on the same machine as the database. A disk failure or a lost
