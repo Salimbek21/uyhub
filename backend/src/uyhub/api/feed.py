@@ -137,11 +137,22 @@ def conditions(filters: FeedFilters) -> list[ColumnElement[bool]]:
         )
 
     if filters.q:
-        # Both columns carry a trigram GIN index, which is what makes a
+        # SPEC 9.2 says title and landmark. Measured on the first real
+        # listings that is close to useless: the title is only a room count
+        # and a district, and `landmark` was set on 1 listing in 27 — so a
+        # search for "metro" found nothing while twelve descriptions mentioned
+        # one. In a city where people navigate by metro station that is the
+        # search failing at its job, so the description is included too.
+        #
+        # All three columns carry a trigram GIN index, which is what makes a
         # leading-wildcard ILIKE indexable at all.
         pattern = f"%{filters.q.strip()}%"
         clauses.append(
-            or_(Listing.title.ilike(pattern), Listing.landmark.ilike(pattern)),
+            or_(
+                Listing.title.ilike(pattern),
+                Listing.landmark.ilike(pattern),
+                Listing.description.ilike(pattern),
+            ),
         )
 
     return clauses

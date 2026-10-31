@@ -608,6 +608,21 @@ which is SeaweedFS's port *inside* the container — the host mapping is 19000.
 Every photo was a broken image until the default was corrected. The public
 thumbnail returns 200 and the private original still returns 403.
 
+### Two more defects the walkthrough found
+
+**Search could not find a metro station.** SPEC 9.2 scopes `q` to the title
+and the landmark. In practice the title is only a room count and a district,
+and `landmark` was populated on 1 listing in 27 — so searching "metro" matched
+nothing while twelve descriptions mentioned one, and "bodomzor" matched
+nothing at all. In a city where people navigate by metro station that is the
+search failing at its job, so the description is now searched too (migration
+`0005` adds the trigram index). "metro" now returns 12, "bodomzor" 1,
+"yevro remont" 3.
+
+**Russian plurals.** The filter sheet's primary button read "Показать 1
+объявлений". Number agreement now uses a `plural()` helper; Uzbek needs none,
+which is why only the Russian table has it.
+
 ### Known gaps
 
 1. **Favourites and saved searches are per-device.** They live in

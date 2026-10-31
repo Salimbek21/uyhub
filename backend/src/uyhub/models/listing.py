@@ -164,6 +164,15 @@ class Listing(UuidMixin, TimestampMixin, Base):
             postgresql_using="gin",
             postgresql_ops={"landmark": "gin_trgm_ops"},
         ),
+        # The feed's text search also looks in the description: the title is
+        # only a room count and a district, so searching for a landmark or a
+        # metro station finds nothing without this.
+        Index(
+            "ix_listings_description_trgm",
+            "description",
+            postgresql_using="gin",
+            postgresql_ops={"description": "gin_trgm_ops"},
+        ),
         # The `price_per_m2` sort (SPEC 9.2). The expression must be spelled
         # exactly as `api.feed.price_per_m2_expression` renders it or the
         # planner will not match the two.

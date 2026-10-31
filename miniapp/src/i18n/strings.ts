@@ -220,6 +220,21 @@ const uz: Strings = {
   },
 }
 
+/**
+ * Russian number agreement: 1 объявление, 2 объявления, 5 объявлений.
+ *
+ * Uzbek needs none of this — a counted noun stays singular — which is why only
+ * this table has the helper.
+ */
+function plural(n: number, one: string, few: string, many: string): string {
+  const mod100 = n % 100
+  if (mod100 >= 11 && mod100 <= 14) return many
+  const mod10 = n % 10
+  if (mod10 === 1) return one
+  if (mod10 >= 2 && mod10 <= 4) return few
+  return many
+}
+
 const ru: Strings = {
   appName: 'UyHub',
   navFeed: 'Объявления',
@@ -234,7 +249,7 @@ const ru: Strings = {
   anyRooms: 'Неважно',
   roomsShort: (n) => `${n} комн.`,
   roomsPlus: (n) => `${n}+ комн.`,
-  resultsCount: (n) => `${n} объявлений`,
+  resultsCount: (n) => `${n} ${plural(n, 'объявление', 'объявления', 'объявлений')}`,
   nothingFound: 'Ничего не найдено',
   nothingFoundHint: 'Попробуйте расширить фильтры или зайдите позже.',
   resetFilters: 'Сбросить фильтры',
@@ -254,7 +269,8 @@ const ru: Strings = {
   sortBy: 'Сортировка',
   searchPlaceholder: 'Поиск по ориентиру или заголовку',
   apply: 'Применить',
-  applyWithCount: (n) => `Показать ${n} объявлений`,
+  applyWithCount: (n) =>
+    `Показать ${n} ${plural(n, 'объявление', 'объявления', 'объявлений')}`,
   reset: 'Сбросить',
   saveSearch: 'Сохранить поиск',
 
