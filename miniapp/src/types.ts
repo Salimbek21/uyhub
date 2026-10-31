@@ -37,9 +37,11 @@ export interface ListingCard {
   title: string
   deal_type: DealType
   property_type: PropertyType
-  price_amount: number
-  price_currency: 'USD' | 'UZS'
-  price_usd: number
+  /** Null when the post never named a price — rarer than it sounds, but real. */
+  price_amount: number | null
+  price_currency: 'USD' | 'UZS' | null
+  /** Null for a UZS price seen while no exchange rate was available. */
+  price_usd: number | null
   price_period: 'month' | 'day' | null
   price_per_m2: number | null
   district: DistrictId | null
@@ -59,8 +61,8 @@ export interface ListingCard {
 export interface ListingPhoto {
   large_url: string | null
   thumb_url: string | null
-  width: number
-  height: number
+  width: number | null
+  height: number | null
 }
 
 /** Where a listing was seen — the attribution required by SPEC 13. */
@@ -78,7 +80,7 @@ export interface PriceObservation {
 
 /** Full detail — `GET /v1/listings/{id}`. Never includes phones. */
 export interface ListingDetail extends ListingCard {
-  description: string
+  description: string | null
   landmark: string | null
   address_text: string | null
   building_type: BuildingType
@@ -110,7 +112,8 @@ export interface Filters {
 export interface Page<T> {
   items: T[]
   next_cursor: string | null
-  total: number
+  /** Null when the server could not count — render "no count", never zero. */
+  total: number | null
 }
 
 /** A saved search — `GET /v1/saved-searches`. */

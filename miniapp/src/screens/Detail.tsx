@@ -4,9 +4,9 @@ import { useMutation, useQuery, useQueryClient } from '@tanstack/react-query'
 import { useState } from 'react'
 
 import { Gallery } from '../components/Gallery'
-import { ExternalIcon, HeartIcon, PhoneIcon } from '../components/Icons'
+import { ExternalIcon, HeartIcon } from '../components/Icons'
 import { ErrorState } from '../components/ui'
-import { getListing, revealContact, toggleFavorite } from '../data/client'
+import { getListing, toggleFavorite } from '../data/client'
 import { useI18n } from '../i18n/useI18n'
 import { haptic, openLink } from '../telegram'
 
@@ -22,7 +22,6 @@ function Fact({ label, value }: { label: string; value: string }) {
 export function Detail({ id, onBack }: { id: string; onBack: () => void }) {
   const { t, formatPrice, formatNumber, formatSince } = useI18n()
   const queryClient = useQueryClient()
-  const [phones, setPhones] = useState<string[] | null>(null)
   const [reported, setReported] = useState(false)
 
   const query = useQuery({ queryKey: ['listing', id], queryFn: () => getListing(id) })
@@ -33,14 +32,6 @@ export function Detail({ id, onBack }: { id: string; onBack: () => void }) {
       void queryClient.invalidateQueries({ queryKey: ['listing', id] })
       void queryClient.invalidateQueries({ queryKey: ['listings'] })
       void queryClient.invalidateQueries({ queryKey: ['favorites'] })
-    },
-  })
-
-  const contact = useMutation({
-    mutationFn: () => revealContact(id),
-    onSuccess: (result) => {
-      haptic.notify('success')
-      setPhones(result)
     },
   })
 
@@ -63,8 +54,16 @@ export function Detail({ id, onBack }: { id: string; onBack: () => void }) {
   const period =
     listing.price_period === 'month' ? t.perMonth : listing.price_period === 'day' ? t.perDay : null
 
-  const previous = listing.price_history.length > 1 ? listing.price_history[0] : null
-  const dropped = previous && previous.price_usd > listing.price_usd
+  const previous = listing.price_history.length > 1 ? listing.price_history[0] : undefined
+  const dropped =
+    previous !== undefined &&
+    previous.price_usd !== null &&
+    listing.price_usd !== null &&
+    previous.price_usd > listing.price_usd
+
+  // Where the seller actually is. The first source is the earliest sighting,
+  // which is the post most likely still to be up.
+  const contactLink = listing.sources.find((source) => source.tg_link)?.tg_link ?? null
 
   return (
     <div className="pb-6">
@@ -190,25 +189,28 @@ export function Detail({ id, onBack }: { id: string; onBack: () => void }) {
       </section>
 
       <div className="mt-4 space-y-2 px-4">
-        {phones ? (
-          <a
-            href={`tel:${phones[0]}`}
-            className="flex w-full items-center justify-center gap-2 rounded-xl bg-tg-button py-3.5 text-[15px] font-semibold text-tg-button-text"
-          >
-            <PhoneIcon />
-            {phones[0]}
-          </a>
-        ) : (
-          <button
-            type="button"
-            disabled={contact.isPending}
-            onClick={() => contact.mutate()}
-            className="flex w-full items-center justify-center gap-2 rounded-xl bg-tg-button py-3.5 text-[15px] font-semibold text-tg-button-text disabled:opacity-60"
-          >
-            <PhoneIcon />
-            {t.showPhone}
-          </button>
-        )}
+        {/*
+          There is no "show phone" button, and deliberately so: phone numbers
+          are stored only as HMAC hashes (docs/DECISIONS.md P.2), so nothing
+          can reveal one. The original post is where the number is, and this
+          takes the user straight there.
+        */}
+        {contactLink ? (
+          <>
+            <button
+              type="button"
+              onClick={() => {
+                haptic.impact()
+                openLink(contactLink)
+              }}
+              className="flex w-full items-center justify-center gap-2 rounded-xl bg-tg-button py-3.5 text-[15px] font-semibold text-tg-button-text"
+            >
+              <ExternalIcon className="h-4 w-4 shrink-0" />
+              {t.contactSeller}
+            </button>
+            <p className="px-1 text-center text-xs text-tg-hint">{t.contactHint}</p>
+          </>
+        ) : null}
 
         <button
           type="button"

@@ -14,7 +14,13 @@ interface I18nValue {
   t: Strings
   setLang: (lang: Language) => void
   /** `65 000 $` / `650 000 000 so'm` — spaced thousands, per SPEC section 10. */
-  formatPrice: (amount: number, currency: 'USD' | 'UZS') => string
+  /**
+   * A price, or an honest "not stated".
+   *
+   * Nullable because the parser leaves the price empty when the post never
+   * named one — showing a zero would be inventing a number.
+   */
+  formatPrice: (amount: number | null, currency: 'USD' | 'UZS' | null) => string
   formatNumber: (value: number) => string
   /** Relative time in the active language. */
   formatSince: (iso: string) => string
@@ -51,10 +57,12 @@ export function I18nProvider({ children }: { children: ReactNode }) {
       t,
       setLang,
       formatNumber: group,
-      formatPrice: (amount, currency) =>
-        currency === 'USD'
-          ? `${group(Math.round(amount))} $`
-          : `${group(Math.round(amount))} ${lang === 'uz' ? "so'm" : 'сум'}`,
+      formatPrice: (amount, currency) => {
+        if (amount === null) return t.priceUnknown
+        const value = group(Math.round(amount))
+        if (currency === 'UZS') return `${value} ${lang === 'uz' ? "so'm" : 'сум'}`
+        return `${value} $`
+      },
       formatSince: (iso) => {
         const minutes = Math.max(0, Math.round((Date.now() - Date.parse(iso)) / 60000))
         if (minutes < 2) return t.time.justNow

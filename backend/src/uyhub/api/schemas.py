@@ -2,8 +2,9 @@
 
 These mirror ``miniapp/src/types.ts`` field for field. That file was written
 first, against the spec, and is what every Mini App screen is already built
-around — so it is the contract, and `tests/unit/test_api_contract.py` fails if
-the two drift apart.
+around — so it is the contract. Nothing enforces the correspondence
+automatically (DECISIONS 4.6), which means a field renamed on one side has to
+be renamed on the other by hand.
 
 Nothing here exposes a phone number or an original photo key. There is no
 contact endpoint at all: phones are stored only as HMAC hashes, so there is
@@ -15,8 +16,9 @@ from __future__ import annotations
 
 from datetime import datetime
 from decimal import Decimal
+from typing import Annotated
 
-from pydantic import BaseModel, ConfigDict
+from pydantic import BaseModel, ConfigDict, PlainSerializer
 
 from uyhub.models.enums import (
     BuildingType,
@@ -29,6 +31,20 @@ from uyhub.models.enums import (
     Renovation,
 )
 
+Number = Annotated[
+    Decimal,
+    PlainSerializer(float, return_type=float, when_used="json"),
+]
+"""A decimal that goes over the wire as a JSON number, not a string.
+
+Pydantic serialises ``Decimal`` as a string by default, which is right for
+money in general but wrong here: ``miniapp/src/types.ts`` declares these fields
+as ``number``, and JavaScript has no decimal type to receive a string into
+anyway. Every value involved — prices in dollars, areas in square metres — is
+far inside the range a float64 represents exactly enough to display.
+
+Storage and arithmetic stay on ``Decimal``; only the JSON encoding changes."""
+
 
 class ListingCard(BaseModel):
     """One card in the feed — ``GET /v1/listings``."""
@@ -39,15 +55,15 @@ class ListingCard(BaseModel):
     title: str
     deal_type: DealType
     property_type: PropertyType
-    price_amount: Decimal | None
+    price_amount: Number | None
     price_currency: Currency | None
-    price_usd: Decimal | None
+    price_usd: Number | None
     price_period: PricePeriod | None
-    price_per_m2: Decimal | None
+    price_per_m2: Number | None
     district: District | None
     rooms: int | None
-    area_m2: Decimal | None
-    land_sotix: Decimal | None
+    area_m2: Number | None
+    land_sotix: Number | None
     floor: int | None
     floors_total: int | None
     thumb_url: str | None
@@ -75,7 +91,7 @@ class ListingSourceLink(BaseModel):
 
 
 class PriceObservation(BaseModel):
-    price_usd: Decimal | None
+    price_usd: Number | None
     observed_at: datetime
 
 
@@ -118,8 +134,8 @@ class PriceRange(BaseModel):
     """Slider bounds for one deal type, in USD."""
 
     deal_type: DealType
-    min_usd: Decimal | None
-    max_usd: Decimal | None
+    min_usd: Number | None
+    max_usd: Number | None
 
 
 class Meta(BaseModel):

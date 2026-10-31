@@ -6,7 +6,7 @@ import { useEffect, useRef, useState } from 'react'
 import { FilterSheet } from '../components/FilterSheet'
 import { FilterIcon, SearchIcon } from '../components/Icons'
 import { ListingCardView } from '../components/ListingCardView'
-import { CardSkeleton, Chip, EmptyState, ErrorState, PrototypeBanner } from '../components/ui'
+import { CardSkeleton, Chip, EmptyState, ErrorState } from '../components/ui'
 import { listListings, toggleFavorite } from '../data/client'
 import { useI18n } from '../i18n/useI18n'
 import { haptic } from '../telegram'
@@ -130,7 +130,6 @@ export function Feed({ filters, onFiltersChange, onOpen, onSaveSearch }: Props) 
         </div>
       </header>
 
-      <PrototypeBanner />
 
       {query.isError ? (
         <ErrorState onRetry={() => void query.refetch()} />

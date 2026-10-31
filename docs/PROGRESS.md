@@ -562,6 +562,66 @@ Against the running service and the real 27 listings, rather than with tests
 
 ### Next steps
 
-Phase 5 — wire the Mini App to the API: replace the bodies in
-`miniapp/src/data/client.ts` with `fetch` calls, and remove the "Show phone"
-button, which promises something the system deliberately cannot do.
+Phase 5 — wire the Mini App to the API.
+
+---
+
+## Phase 5 — The Mini App on real data ✅
+
+Completed 2026-10-31. **The first time the whole chain is visible end to end:**
+a Telegram post collected, parsed, deduplicated, its photos processed, and the
+result on screen.
+
+### What changed
+
+**`data/client.ts`** — the mock implementation is gone and every function is a
+`fetch`. It stayed the only file that knows where listings come from, so no
+screen needed changing. `src/data/listings.ts`, the 336-line mock, is deleted.
+
+**`telegram.ts`** — exports `initData()`, which `client.ts` sends as
+`Authorization: tma …`. It is a credential, so it goes in a header and never
+into a URL.
+
+**The "Show phone" button is gone.** It promised something the system is built
+not to do: phones are stored only as HMAC hashes (DECISIONS P.2), so no
+endpoint can return one. In its place is "Open the original post", which goes
+to the Telegram message the listing came from — where the number actually is —
+under a line saying the phone is not stored. The prototype banner is gone too,
+along with the strings behind both.
+
+**Contract fixes found by wiring it up.** Three fields were typed as
+non-nullable in `types.ts` and are nullable in the database: `price_amount`,
+`price_usd` and `description`. `Page.total` can be null when the count fails.
+`formatPrice` now takes a nullable amount and renders "price not stated"
+rather than a zero, because the alternative was inventing a number. On the
+server side, money is serialised as a JSON number instead of a string —
+JavaScript has no decimal type to receive a string into.
+
+### Verified in a browser
+
+27 real listings from the local stack, photos loading from the public bucket,
+the rent filter, the detail screen with its gallery, facts, cleaned
+description, source link and no phone anywhere. No console errors.
+
+One real bug this caught: `MEDIA_PUBLIC_BASE_URL` defaulted to port 8333,
+which is SeaweedFS's port *inside* the container — the host mapping is 19000.
+Every photo was a broken image until the default was corrected. The public
+thumbnail returns 200 and the private original still returns 403.
+
+### Known gaps
+
+1. **Favourites and saved searches are per-device.** They live in
+   `localStorage`; `is_favorite` from the server is always false and the client
+   overlays its own set. Switching phones loses them.
+2. **A gapped room filter is narrowed client-side.** The API takes a range and
+   the chips are a set, so "1 or 3 rooms" fetches 1–3 and drops the 2s after.
+   The page can therefore come back shorter than the page size.
+3. **`listFavorites` fetches one listing per id.** Fine for ten, not for a
+   hundred.
+4. **Nothing is wired to Telegram yet** — that needs `BOT_TOKEN` and a public
+   HTTPS origin.
+
+### Next steps
+
+Production. The deployment files exist from Phase 0; what is missing is a
+domain, DNS, a server, and a `BOT_TOKEN` from @BotFather.

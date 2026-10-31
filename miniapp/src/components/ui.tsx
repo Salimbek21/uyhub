@@ -87,13 +87,3 @@ export function ErrorState({ onRetry }: { onRetry: () => void }) {
     </div>
   )
 }
-
-/** Explains that the data is fake. Removed when the real API lands in Phase 4. */
-export function PrototypeBanner() {
-  const { t } = useI18n()
-  return (
-    <div className="mx-3 mt-3 rounded-xl border border-dashed border-tg-border bg-tg-section px-3 py-2">
-      <p className="text-xs leading-snug text-tg-hint">{t.prototypeNotice}</p>
-    </div>
-  )
-}

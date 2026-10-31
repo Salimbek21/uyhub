@@ -79,6 +79,15 @@ function sdk(): WebApp | undefined {
  */
 export const insideTelegram = (): boolean => Boolean(sdk()?.initData)
 
+/**
+ * The signed credential the API authenticates with (SPEC 9.1).
+ *
+ * Empty outside Telegram, which is exactly the case the API's
+ * `API_ALLOW_INSECURE_AUTH` development flag covers. It is a credential, so it
+ * belongs in the `Authorization` header and never in a URL or a log.
+ */
+export const initData = (): string => sdk()?.initData ?? ''
+
 /** The SDK, but only when it can actually do anything. */
 function app(): WebApp | undefined {
   return insideTelegram() ? sdk() : undefined

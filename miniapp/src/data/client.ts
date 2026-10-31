@@ -1,32 +1,73 @@
 /**
  * Data access.
  *
- * This is the ONLY file that knows where listings come from. Every function here
- * matches an endpoint in docs/SPEC.md section 9.2, so Phase 4 replaces the bodies
- * with `fetch` calls and no screen changes.
+ * This is the ONLY file that knows where listings come from. Every function
+ * here maps to an endpoint in docs/SPEC.md section 9.2:
  *
- *   listListings   -> GET    /v1/listings
- *   getListing     -> GET    /v1/listings/{id}
- *   revealContact  -> POST   /v1/listings/{id}/contact
- *   toggleFavorite -> PUT/DELETE /v1/favorites/{id}
- *   listFavorites  -> GET    /v1/favorites
- *   savedSearches  -> GET/POST/DELETE /v1/saved-searches
+ *   listListings   -> GET /v1/listings
+ *   getListing     -> GET /v1/listings/{id}
+ *   countMatches   -> GET /v1/listings?limit=1   (reads `total`)
+ *
+ * Favourites and saved searches are still local to the device. The server
+ * tables exist but the write endpoints do not yet, and keeping them here means
+ * the screens that use them did not have to change when the feed went live.
+ *
+ * There is no `revealContact`. Phone numbers are stored only as HMAC hashes
+ * (docs/DECISIONS.md P.2), so no endpoint can return one; `ListingDetail.sources`
+ * links to the original posts, where the number actually is.
  */
 
 import type { Filters, ListingCard, ListingDetail, Page, SavedSearch } from '../types'
-import { MOCK_LISTINGS } from './listings'
+import { initData } from '../telegram'
 
-const PAGE_SIZE = 8
+/**
+ * Where the API lives.
+ *
+ * Same-origin by default so a production build behind one reverse proxy needs
+ * no configuration; `VITE_API_BASE_URL` points `npm run dev` at a local API.
+ */
+const API_BASE = (import.meta.env.VITE_API_BASE_URL ?? '').replace(/\/$/, '')
 
-/** Simulated round-trip so loading states are visible and real. */
-const LATENCY_MS = 350
+/** Raised for any non-2xx response, carrying the status so callers can branch. */
+export class ApiError extends Error {
+  constructor(
+    readonly status: number,
+    readonly detail: string,
+  ) {
+    super(`${status}: ${detail}`)
+    this.name = 'ApiError'
+  }
+}
 
-function delay<T>(value: T, ms = LATENCY_MS): Promise<T> {
-  return new Promise((resolve) => setTimeout(() => resolve(value), ms))
+async function request<T>(path: string, params?: URLSearchParams): Promise<T> {
+  const url = `${API_BASE}${path}${params && [...params].length ? `?${params}` : ''}`
+
+  // Telegram's initData is the credential (SPEC 9.1). Outside Telegram there
+  // is none, and the API rejects the request unless it is running with
+  // API_ALLOW_INSECURE_AUTH — which is how `npm run dev` works in a browser.
+  const auth = initData()
+  const response = await fetch(url, {
+    headers: auth ? { Authorization: `tma ${auth}` } : {},
+  })
+
+  if (!response.ok) {
+    throw new ApiError(response.status, await detailOf(response))
+  }
+  return (await response.json()) as T
+}
+
+async function detailOf(response: Response): Promise<string> {
+  try {
+    const body = (await response.json()) as { detail?: unknown }
+    return typeof body.detail === 'string' ? body.detail : response.statusText
+  } catch {
+    return response.statusText
+  }
 }
 
 // --- Local persistence ------------------------------------------------------
-// Phase 4 moves these to the server (`favorites`, `saved_searches` tables).
+// Favourites and saved searches are per-device until the server write path
+// exists. The feed's `is_favorite` is always false, so it is overlaid here.
 
 const FAVORITES_KEY = 'uyhub.favorites'
 const SEARCHES_KEY = 'uyhub.saved_searches'
@@ -48,51 +89,41 @@ export function favoriteIds(): Set<string> {
   return readSet(FAVORITES_KEY)
 }
 
-// --- Filtering ---------------------------------------------------------------
+// --- Filters to query parameters ---------------------------------------------
 
-function matches(listing: ListingDetail, f: Filters): boolean {
-  if (listing.deal_type !== f.deal_type) return false
-  if (f.property_type && listing.property_type !== f.property_type) return false
-  if (f.districts.length && (!listing.district || !f.districts.includes(listing.district))) {
-    return false
+function queryOf(filters: Filters): URLSearchParams {
+  const params = new URLSearchParams()
+  params.set('deal_type', filters.deal_type)
+  if (filters.property_type) params.set('property_type', filters.property_type)
+  for (const district of filters.districts) params.append('district', district)
+
+  if (filters.rooms.length) {
+    // The chips are a set of exact counts where 4 means "4 or more", but the
+    // API takes a range. A contiguous set converts exactly; a gapped one
+    // ("1 or 3") widens to its span, so the extra rows are filtered out below.
+    params.set('rooms_min', String(Math.min(...filters.rooms)))
+    if (!filters.rooms.includes(4)) params.set('rooms_max', String(Math.max(...filters.rooms)))
   }
-  if (f.rooms.length) {
-    // 4 means "4 or more", matching the feed's chip labels.
-    const ok = f.rooms.some((r) => (r >= 4 ? (listing.rooms ?? 0) >= 4 : listing.rooms === r))
-    if (!ok) return false
-  }
-  if (f.price_min !== null && listing.price_usd < f.price_min) return false
-  if (f.price_max !== null && listing.price_usd > f.price_max) return false
-  if (f.area_min !== null && (listing.area_m2 ?? 0) < f.area_min) return false
-  if (f.area_max !== null && (listing.area_m2 ?? Infinity) > f.area_max) return false
-  if (f.has_photos && listing.photo_count === 0) return false
-  if (f.q.trim()) {
-    const needle = f.q.trim().toLowerCase()
-    const hay = `${listing.title} ${listing.landmark ?? ''}`.toLowerCase()
-    if (!hay.includes(needle)) return false
-  }
-  return true
+
+  if (filters.price_min !== null) params.set('price_min', String(filters.price_min))
+  if (filters.price_max !== null) params.set('price_max', String(filters.price_max))
+  if (filters.area_min !== null) params.set('area_min', String(filters.area_min))
+  if (filters.area_max !== null) params.set('area_max', String(filters.area_max))
+  if (filters.has_photos) params.set('has_photos', 'true')
+  if (filters.q.trim()) params.set('q', filters.q.trim())
+  params.set('sort', filters.sort)
+  return params
 }
 
-function sortListings(items: ListingDetail[], sort: Filters['sort']): ListingDetail[] {
-  const sorted = [...items]
-  switch (sort) {
-    case 'price_asc':
-      return sorted.sort((a, b) => a.price_usd - b.price_usd)
-    case 'price_desc':
-      return sorted.sort((a, b) => b.price_usd - a.price_usd)
-    case 'price_per_m2':
-      return sorted.sort((a, b) => (a.price_per_m2 ?? Infinity) - (b.price_per_m2 ?? Infinity))
-    case 'new':
-    default:
-      return sorted.sort(
-        (a, b) => Date.parse(b.first_seen_at) - Date.parse(a.first_seen_at),
-      )
-  }
+/** Whether a gapped room selection needs client-side narrowing. */
+function roomsAreGapped(rooms: number[]): boolean {
+  if (rooms.length < 2) return false
+  const span = Math.max(...rooms) - Math.min(...rooms) + 1
+  return !rooms.includes(4) && span !== rooms.length
 }
 
-function toCard(listing: ListingDetail, favorites: Set<string>): ListingCard {
-  return { ...listing, is_favorite: favorites.has(listing.id) }
+function matchesRooms(card: ListingCard, rooms: number[]): boolean {
+  return rooms.some((r) => (r >= 4 ? (card.rooms ?? 0) >= 4 : card.rooms === r))
 }
 
 // --- API ----------------------------------------------------------------------
@@ -101,29 +132,36 @@ export async function listListings(
   filters: Filters,
   cursor: string | null,
 ): Promise<Page<ListingCard>> {
+  const params = queryOf(filters)
+  if (cursor) params.set('cursor', cursor)
+
+  const page = await request<Page<ListingCard>>('/v1/listings', params)
   const favorites = favoriteIds()
-  const all = sortListings(MOCK_LISTINGS.filter((l) => matches(l, filters)), filters.sort)
-  const start = cursor ? Number(cursor) : 0
-  const slice = all.slice(start, start + PAGE_SIZE)
-  const next = start + PAGE_SIZE < all.length ? String(start + PAGE_SIZE) : null
-  return delay({
-    items: slice.map((l) => toCard(l, favorites)),
-    next_cursor: next,
-    total: all.length,
-  })
+  let items = page.items.map((item) => ({ ...item, is_favorite: favorites.has(item.id) }))
+  if (roomsAreGapped(filters.rooms)) {
+    items = items.filter((item) => matchesRooms(item, filters.rooms))
+  }
+  return { ...page, items }
 }
 
 export async function getListing(id: string): Promise<ListingDetail> {
-  const favorites = favoriteIds()
-  const found = MOCK_LISTINGS.find((l) => l.id === id)
-  if (!found) throw new Error('not_found')
-  return delay({ ...found, is_favorite: favorites.has(found.id) })
+  const listing = await request<ListingDetail>(`/v1/listings/${encodeURIComponent(id)}`)
+  return { ...listing, is_favorite: favoriteIds().has(listing.id) }
 }
 
+/**
+ * The favourited listings, fetched one by one.
+ *
+ * There is no server-side favourites endpoint yet, and the ids live on this
+ * device. A listing that has since expired or been removed 404s, and is
+ * dropped from the list rather than failing the whole screen.
+ */
 export async function listFavorites(): Promise<ListingCard[]> {
-  const favorites = favoriteIds()
-  const items = MOCK_LISTINGS.filter((l) => favorites.has(l.id)).map((l) => toCard(l, favorites))
-  return delay(items)
+  const ids = [...favoriteIds()]
+  const results = await Promise.all(
+    ids.map((id) => getListing(id).catch(() => null)),
+  )
+  return results.filter((listing): listing is ListingDetail => listing !== null)
 }
 
 export async function toggleFavorite(id: string): Promise<boolean> {
@@ -132,28 +170,15 @@ export async function toggleFavorite(id: string): Promise<boolean> {
   if (now) favorites.add(id)
   else favorites.delete(id)
   writeSet(FAVORITES_KEY, favorites)
-  return delay(now, 80)
-}
-
-/**
- * Reveals the seller's phone.
- *
- * In production this hits `POST /v1/listings/{id}/contact`, which writes a
- * `contact_reveals` row and is rate limited to 30 per user per hour (SPEC 9.2).
- * Phones are never part of the listing payload — that is why this is a separate
- * call rather than a field.
- */
-export async function revealContact(id: string): Promise<string[]> {
-  const n = (Number(id.replace(/\D/g, '')) % 7) + 1
-  return delay([`+99890${String(1000000 + n * 137).slice(0, 7)}`], 500)
+  return now
 }
 
 export async function listSavedSearches(): Promise<SavedSearch[]> {
   try {
     const raw = localStorage.getItem(SEARCHES_KEY)
-    return delay(raw ? (JSON.parse(raw) as SavedSearch[]) : [], 120)
+    return raw ? (JSON.parse(raw) as SavedSearch[]) : []
   } catch {
-    return delay([], 120)
+    return []
   }
 }
 
@@ -173,16 +198,18 @@ export async function createSavedSearch(
   // SPEC section 3 caps saved searches at 10 per user.
   const next = [...existing, entry].slice(-10)
   localStorage.setItem(SEARCHES_KEY, JSON.stringify(next))
-  return delay(entry, 120)
+  return entry
 }
 
 export async function deleteSavedSearch(id: string): Promise<void> {
   const existing = await listSavedSearches()
   localStorage.setItem(SEARCHES_KEY, JSON.stringify(existing.filter((s) => s.id !== id)))
-  return delay(undefined, 100)
 }
 
 /** How many listings match, without fetching a page. Used by the filter sheet. */
 export async function countMatches(filters: Filters): Promise<number> {
-  return delay(MOCK_LISTINGS.filter((l) => matches(l, filters)).length, 120)
+  const params = queryOf(filters)
+  params.set('limit', '1')
+  const page = await request<Page<ListingCard>>('/v1/listings', params)
+  return page.total ?? page.items.length
 }

@@ -77,7 +77,7 @@ class Settings(BaseSettings):
     API to every site."""
 
     media_public_base_url: str = Field(
-        default="http://localhost:8333/uyhub-media",
+        default="http://localhost:19000/uyhub-media",
         alias="MEDIA_PUBLIC_BASE_URL",
     )
     """Where the public bucket is reachable from a browser. Derivatives only —

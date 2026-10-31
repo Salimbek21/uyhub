@@ -50,12 +50,13 @@ export interface Strings {
   perMonth: string
   perDay: string
   negotiable: string
+  priceUnknown: string
   floorOf: (floor: number, total: number) => string
   landArea: string
   buildingType: string
   renovationLabel: string
-  showPhone: string
-  callNow: string
+  contactSeller: string
+  contactHint: string
   originalPost: string
   originalPosts: string
   priceHistory: string
@@ -94,7 +95,6 @@ export interface Strings {
   properties: Record<PropertyType, string>
   renovations: Record<Renovation, string>
   sorts: Record<SortOption, string>
-  prototypeNotice: string
 }
 
 const uz: Strings = {
@@ -139,12 +139,13 @@ const uz: Strings = {
   perMonth: 'oyiga',
   perDay: 'kuniga',
   negotiable: 'Kelishiladi',
+  priceUnknown: 'Narx ko\'rsatilmagan',
   floorOf: (floor, total) => `${floor}/${total}-qavat`,
   landArea: 'Yer maydoni',
   buildingType: 'Uy turi',
   renovationLabel: 'Ta\'mir',
-  showPhone: 'Telefon raqamni ko\'rsatish',
-  callNow: 'Qo\'ng\'iroq qilish',
+  contactSeller: 'Asl e\'lonni ochish',
+  contactHint: 'Telefon raqam saqlanmaydi — u asl postda turadi',
   originalPost: 'Asl e\'lon',
   originalPosts: 'Asl e\'lonlar',
   priceHistory: 'Narx tarixi',
@@ -217,8 +218,6 @@ const uz: Strings = {
     price_desc: 'Avval qimmatlari',
     price_per_m2: 'm² narxi bo\'yicha',
   },
-  prototypeNotice:
-    'Namuna ma\'lumotlar. Haqiqiy e\'lonlar Telegram guruhlaridan yig\'ila boshlagach paydo bo\'ladi.',
 }
 
 const ru: Strings = {
@@ -263,12 +262,13 @@ const ru: Strings = {
   perMonth: 'в месяц',
   perDay: 'в сутки',
   negotiable: 'Торг уместен',
+  priceUnknown: 'Цена не указана',
   floorOf: (floor, total) => `${floor}/${total} этаж`,
   landArea: 'Площадь участка',
   buildingType: 'Тип дома',
   renovationLabel: 'Ремонт',
-  showPhone: 'Показать телефон',
-  callNow: 'Позвонить',
+  contactSeller: 'Открыть оригинал объявления',
+  contactHint: 'Телефон не хранится — он в оригинальном посте',
   originalPost: 'Оригинал объявления',
   originalPosts: 'Оригиналы объявлений',
   priceHistory: 'История цены',
@@ -342,8 +342,6 @@ const ru: Strings = {
     price_desc: 'Сначала дорогие',
     price_per_m2: 'По цене за м²',
   },
-  prototypeNotice:
-    'Демонстрационные данные. Реальные объявления появятся после запуска сбора из Telegram-групп.',
 }
 
 export const STRINGS: Record<Language, Strings> = { uz, ru }
