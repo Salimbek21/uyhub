@@ -271,6 +271,28 @@ class TestRealPostFormats:
         assert result.extraction is not None
         assert result.extraction.property_type is None
 
+    def test_a_labelled_floor_pair_reads_both_numbers(self, settings: Settings) -> None:
+        """`3/12 qavat` is the third floor of twelve, not the twelfth.
+
+        The parser was built around `2Xona 6/10`, where the pair follows a room
+        count. Standing alone with a floor word after it, the single-floor
+        pattern matched the `12 qavat` at the end and the leading number was
+        dropped — so a third-floor flat was listed as a twelfth-floor one. Sale
+        posts use this format constantly.
+        """
+        result = parse(
+            "Yashnobod, Novostroyka 3/12 qavat, 82 m², Narx: 92 000 у.е.", settings=settings
+        )
+        assert result.extraction is not None
+        assert (result.extraction.floor, result.extraction.floors_total) == (3, 12)
+
+    def test_a_sale_is_read_from_the_price_alone(self, settings: Settings) -> None:
+        """Both collected sources are rental channels, so sale coverage rests
+        on the price rule rather than on observed data."""
+        result = parse("Mirzo Ulug'bek, 2 xona 6/10, 58 m², Narx: 48 000$", settings=settings)
+        assert result.extraction is not None
+        assert result.extraction.deal_type is DealType.SALE
+
     def test_enabling_the_llm_without_one_built_fails_loudly(
         self, monkeypatch: pytest.MonkeyPatch
     ) -> None:

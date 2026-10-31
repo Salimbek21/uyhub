@@ -80,6 +80,15 @@ _ROOMS_FLOOR_TOTAL_RE = re.compile(
 )
 _FLOOR_TOTAL_RE = re.compile(r"(?<!\d)(?P<floor>\d{1,2})\s*/\s*(?P<total>\d{1,2})(?!\s*/)(?!\d)")
 
+# "3/12 qavat", "5/9 этаж" — a pair that names itself. This has to be tried
+# before `_FLOOR_RE`, which would otherwise match the `12 qavat` at the end and
+# report a third-floor flat as being on the twelfth.
+_FLOOR_TOTAL_LABELLED_RE = re.compile(
+    r"(?<!\d)(?P<floor>\d{1,2})\s*/\s*(?P<total>\d{1,2})(?!\s*/)(?!\d)"
+    r"[ \t]*[-–—]?[ \t]*(?:qavat|қават|этаж|эт\.?)",
+    re.IGNORECASE,
+)
+
 # `комнат` is left open-ended: Russian declines it through комната, комнаты,
 # комнат, комнатная, комнатную. `xonali` is not, because `xonadon` is a
 # different word.
@@ -285,6 +294,18 @@ def find_rooms_and_floors(text: str) -> RoomsFloors:
         )
 
     rooms = spelled_rooms
+
+    # A pair that labels itself — "3/12 qavat" — says both numbers at once, so
+    # it is read before the single-floor patterns. Sale posts use this format
+    # constantly, and without it the total was being read as the floor.
+    labelled = _FLOOR_TOTAL_LABELLED_RE.search(text)
+    if labelled:
+        return RoomsFloors(
+            rooms=rooms,
+            floor=int(labelled.group("floor")),
+            floors_total=int(labelled.group("total")),
+        )
+
     floor = _first_int(_FLOOR_RE, text)
     floors_total = _first_int(_FLOORS_TOTAL_RE, text) or _first_int(_FLOORS_OUT_OF_RE, text)
 

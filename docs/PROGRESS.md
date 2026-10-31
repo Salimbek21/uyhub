@@ -722,6 +722,25 @@ phone number in plaintext in `raw_messages.text`. "We only store hashes" is
 true of `listings` and of nothing else, so SPEC 13's requirement that the data
 stay in Uzbekistan applies in full.
 
+### Sale listings: the parser finds them, the sources do not have them
+
+All 27 listings are rentals, which looked like a coverage problem and is not:
+both configured sources are rental channels — `Toshkent_Kvartira_Arenda_Makler`
+says so in its name. Checked against realistic sale formats, the parser reads
+every one: an explicit "sotiladi", a bare price with no verb, a hovli, a plot
+in sotix, a so'm price, and the Cyrillic `у.е.` — and still calls a $450
+monthly post a rental.
+
+One real defect surfaced while checking. **`3/12 qavat` was read as the twelfth
+floor**, not the third of twelve. The parser was built around `2Xona 6/10`,
+where the pair follows a room count; standing alone with a floor word after it,
+the single-floor pattern matched the trailing `12 qavat` and the leading number
+was dropped. Sale posts use that format constantly. Fixed, with a regression
+test, and the older formats still parse.
+
+Getting sale inventory is a matter of adding sale sources — `uyhub sources add`
+— not of changing code.
+
 ### What is still missing
 
 1. **Backups sit on the same machine as the database.** Protects against a
