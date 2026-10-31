@@ -381,6 +381,20 @@ api.<domain>     A   <vps-ip>
 media.<domain>   A   <vps-ip>
 ```
 
+**Bot token.** [@BotFather](https://t.me/BotFather) → `/newbot` → a name and a
+username ending in `bot`. The reply contains a `123456:ABC-DEF…` string: that is
+`BOT_TOKEN`. The API needs it to verify that a request really came from Telegram,
+so it is required from the very first deploy, long before the bot itself exists.
+
+Then, still in BotFather, point the Mini App at the deployment:
+`/newapp` → pick the bot → title, description, a 640×360 icon → the URL
+`https://app.<domain>`. That is what makes the Mini App openable inside Telegram.
+
+Paste the token straight into the server's `.env`. Do not send it over chat.
+
+**A SIM for the userbot** is separate and already covered in section 3 — the
+collector account is not the bot.
+
 ### 4.2 First-time server setup
 
 ```bash
@@ -418,9 +432,31 @@ chmod 600 .env
 # sent over chat, and never committed.
 openssl rand -base64 32    # -> POSTGRES_PASSWORD (also into DATABASE_URL)
 openssl rand -base64 32    # -> S3_SECRET_KEY
+openssl rand -hex 32       # -> PHONE_HASH_KEY  (see the warning below)
 
-nano .env                  # fill in DOMAIN, ACME_EMAIL and the two passwords
+nano .env
 ```
+
+Fill in, and `deploy.sh` refuses to run until each is present:
+
+| Variable | Value |
+|---|---|
+| `DOMAIN` | your domain, without a host prefix — `uyhub.uz`, not `app.uyhub.uz` |
+| `ACME_EMAIL` | where Let's Encrypt sends expiry warnings |
+| `POSTGRES_PASSWORD` | generated above, and the same value inside `DATABASE_URL` |
+| `S3_SECRET_KEY` | generated above |
+| `PHONE_HASH_KEY` | generated above — **generate once and never change it** |
+| `TG_API_ID`, `TG_API_HASH` | from my.telegram.org, for the collector |
+| `BOT_TOKEN` | from @BotFather |
+| `CORS_ALLOW_ORIGINS` | `https://app.<domain>` — exactly this, never `*` |
+| `MEDIA_PUBLIC_BASE_URL` | `https://media.<domain>` — note: **no bucket name**, Caddy adds it |
+| `API_ALLOW_INSECURE_AUTH` | `false`. Deploy refuses otherwise |
+
+> **`PHONE_HASH_KEY` is not rotatable.** Changing it orphans every
+> `suppressed_phones` row, which un-suppresses listings whose owners asked to be
+> removed, and breaks deduplication against everything already collected. Generate
+> it once, back it up with the rest of your credentials, and leave it alone
+> (OPEN_QUESTIONS C8).
 
 ### 4.3 Deploying
 
@@ -449,8 +485,31 @@ curl https://api.<domain>/readyz      # all three dependencies ok
 open https://app.<domain>             # the Mini App
 ```
 
-`/metrics` is deliberately unreachable from the internet (SPEC 9.1); Caddy returns 404
-for it. Prometheus scrapes it over the Docker network from Phase 7.
+Then check the things that are wrong in a way nothing else notices:
+
+```bash
+# The feed must refuse an anonymous caller. 200 here means the API is open to
+# the internet; deploy.sh asserts this too (DECISIONS 6.2).
+curl -s -o /dev/null -w '%{http_code}\n' https://api.<domain>/v1/listings       # 401
+
+# Derived photos are public, originals are not. The second one returning 200
+# would mean serving untouched camera files, EXIF and all.
+curl -s -o /dev/null -w '%{http_code}\n' https://media.<domain>/listings/<id>/0_thumb.webp  # 200
+curl -s -o /dev/null -w '%{http_code}\n' https://media.<domain>/../uyhub-raw/<key>          # not 200
+
+# /metrics is internal only (SPEC 9.1).
+curl -s -o /dev/null -w '%{http_code}\n' https://api.<domain>/metrics           # 404
+
+# A backup exists within seconds of the first start, not at the end of day one.
+ls -lh infra/backup/
+```
+
+Finally open the Mini App **inside Telegram**, not just in a browser: that is
+the only place `initData` is non-empty, so it is the only place authentication
+is actually exercised end to end. In a plain browser every request will be a
+401, and that is correct behaviour, not a fault.
+
+Prometheus scrapes `/metrics` over the Docker network from Phase 7.
 
 ### 4.5 Watch out for
 
@@ -563,10 +622,77 @@ TBD — Phase 7/8. Partial notes that already matter:
 
 ## 6. Backup and restore
 
-TBD — Phase 7. Nightly encrypted `pg_dump`, 14 daily + 8 weekly, second location in
-Uzbekistan, plus a weekly object-storage mirror. The restore procedure must be tested, not just
-written: Phase 7's DoD requires restoring into a fresh database and running the API
-against it.
+### What runs
+
+The `backup` service dumps Postgres into `infra/backup/` once every
+`BACKUP_INTERVAL_SECONDS` (default daily), keeping `BACKUP_KEEP_DAYS` (default
+14). It runs one dump immediately on start, so a fresh deploy is covered within
+seconds. Files are named `uyhub-<UTC timestamp>.sql.gz`.
+
+Photos are **not** backed up (DECISIONS 6.1). A lost photo is a missing image
+on a card; a lost `raw_messages` row cannot be recovered at all, because
+Telegram history is only retrievable while the post is still up — and the posts
+that matter are the ones that get deleted.
+
+```bash
+docker compose -f infra/docker-compose.prod.yml logs backup | tail -5
+ls -lh infra/backup/
+```
+
+Two log events are worth alerting on: `backup_failed`, and
+`backup_suspiciously_small`, which fires when a dump is less than half the size
+of the previous one — an empty database or a truncated pipe looks like a
+successful backup otherwise.
+
+### Restoring
+
+Verified on 2026-10-31 against the development database: 27 listings, 105
+attributions, 229 photos and 120 raw messages all came back identical.
+
+Restore into a **throwaway database first** and compare the counts. Never
+replay a dump straight over production unless you have already confirmed what
+is in it.
+
+```bash
+cd /opt/uyhub
+DUMP=infra/backup/uyhub-20261031T131230Z.sql.gz        # pick one
+
+# 1. A scratch database alongside the live one.
+docker compose -f infra/docker-compose.prod.yml exec postgres \
+    psql -U "$POSTGRES_USER" -d postgres -c "CREATE DATABASE restore_check;"
+
+# 2. Replay into it.
+gunzip -c "$DUMP" | docker compose -f infra/docker-compose.prod.yml exec -T postgres \
+    psql -U "$POSTGRES_USER" -d restore_check -q
+
+# 3. Compare against what you expect to have lost.
+docker compose -f infra/docker-compose.prod.yml exec postgres psql -U "$POSTGRES_USER" \
+    -d restore_check -c "SELECT count(*) FROM listings;"
+
+# 4. Only then, over the real database — stop the writers first.
+docker compose -f infra/docker-compose.prod.yml stop api collector parser scheduler
+gunzip -c "$DUMP" | docker compose -f infra/docker-compose.prod.yml exec -T postgres \
+    psql -U "$POSTGRES_USER" -d "$POSTGRES_DB" -q
+docker compose -f infra/docker-compose.prod.yml start api collector parser scheduler
+
+# 5. Clean up.
+docker compose -f infra/docker-compose.prod.yml exec postgres \
+    psql -U "$POSTGRES_USER" -d postgres -c "DROP DATABASE restore_check;"
+```
+
+The dump is taken with `--clean --if-exists`, so step 4 replaces the schema and
+data in place; the database does not need to be dropped first.
+
+### Still missing
+
+The dumps live on the same machine as the database. A disk failure or a lost
+server takes both. Copying `infra/backup/` to a second machine in Uzbekistan
+(SPEC 13 requires the data stay in the country) is the next thing to add; until
+then these backups protect against a dropped volume, a bad migration and a
+mistaken `DELETE`, but not against losing the server.
+
+Rehearse a restore before launch, and again after the first month of real
+traffic.
 
 ## 7. Alerts
 

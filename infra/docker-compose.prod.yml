@@ -149,6 +149,45 @@ services:
       resources:
         limits: {memory: 1G}
 
+  # -------------------------------------------------------------------------
+  # Backup
+  # -------------------------------------------------------------------------
+  # A nightly pg_dump into ./backup, kept for BACKUP_KEEP_DAYS.
+  #
+  # This exists because the absence of it already cost real data: a Docker
+  # volume was lost overnight during development and took 47 collected posts
+  # and 398 photos with it. Raw messages cannot be re-collected — Telegram
+  # history is only retrievable while the posts are still up, and the ones
+  # worth having are the ones that get deleted.
+  #
+  # Runs in the Postgres image so pg_dump matches the server version. The loop
+  # is a plain sleep rather than cron: one fewer moving part, and the schedule
+  # is visible right here.
+  backup:
+    image: postgres:16-alpine@sha256:cf78e76683b9ca8c5733cbbdce6c9262b45b6767934dd0a95e671f9a0fc20685
+    restart: unless-stopped
+    logging: *logging
+    environment:
+      PGHOST: postgres
+      POSTGRES_USER: ${POSTGRES_USER:?set in .env}
+      PGPASSWORD: ${POSTGRES_PASSWORD:?set in .env}
+      POSTGRES_DB: ${POSTGRES_DB:?set in .env}
+      BACKUP_KEEP_DAYS: ${BACKUP_KEEP_DAYS:-14}
+      BACKUP_INTERVAL_SECONDS: ${BACKUP_INTERVAL_SECONDS:-86400}
+    volumes:
+      - ./backup.sh:/usr/local/bin/backup.sh:ro
+      - ./backup:/backup
+    depends_on:
+      postgres: {condition: service_healthy}
+    # One backup immediately on start, so a fresh deploy is covered within
+    # seconds rather than at the end of the first interval.
+    entrypoint: ["/bin/sh", "-c"]
+    command:
+      - 'while true; do sh /usr/local/bin/backup.sh || true; sleep "$$BACKUP_INTERVAL_SECONDS"; done'
+    deploy:
+      resources:
+        limits: {memory: 256M}
+
   # Buckets are created by our own code so the same path runs everywhere.
   init-storage:
     <<: *backend
@@ -228,8 +267,8 @@ services:
       context: ../miniapp
       dockerfile: Dockerfile
       args:
-        # Becomes live when the Mini App starts calling the real API in Phase 4;
-        # until then it runs on mock data and ignores this.
+        # Baked into the bundle at build time, so changing the domain means
+        # rebuilding the Mini App, not just restarting it.
         VITE_API_BASE_URL: https://api.${DOMAIN:?set in .env}
     image: uyhub-miniapp:${UYHUB_VERSION:-latest}
     restart: "no"

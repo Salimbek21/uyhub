@@ -638,5 +638,65 @@ which is why only the Russian table has it.
 
 ### Next steps
 
-Production. The deployment files exist from Phase 0; what is missing is a
-domain, DNS, a server, and a `BOT_TOKEN` from @BotFather.
+Production.
+
+---
+
+## Production readiness ✅ (code side)
+
+Completed 2026-10-31. The deployment files existed from Phase 0 but predate the
+API and the live Mini App, and one gap had already cost real data.
+
+### Backups — the gap that already bit us
+
+`infra/backup/` was mounted and nothing wrote to it. During Phase 2 a Docker
+volume was lost overnight and took 47 collected posts and 398 photos with it.
+
+`infra/backup.sh` plus a `backup` service now dump Postgres on an interval
+(default daily, 14 days kept), starting with one dump immediately on boot. The
+script writes to `.part` and renames only on success, so a truncated pipe can
+never look like a good backup, and it warns when a dump is less than half the
+size of the previous one — an empty database otherwise looks like a win.
+Retention runs only after a successful write, so a failing backup cannot delete
+the last good one.
+
+Photos are deliberately excluded (DECISIONS 6.1): a lost photo is a missing
+image on a card and can be re-downloaded, while a lost `raw_messages` row is
+gone for good.
+
+**Verified, not just written.** Dumped the live database, restored into a
+throwaway one, compared: 27 listings, 105 attributions, 229 photos, 120 raw
+messages — identical. The procedure is in `RUNBOOK.md` section 6.
+
+### Deploy guards
+
+`deploy.sh` now refuses to start when `BOT_TOKEN`, `CORS_ALLOW_ORIGINS` or
+`MEDIA_PUBLIC_BASE_URL` is unset, when `API_ALLOW_INSECURE_AUTH` is true, when
+CORS contains a `*`, or when the public media URL points at the private
+originals bucket. Each was tested against a deliberately bad `.env`.
+
+The smoke test previously checked `/readyz`, which proves the datastores answer
+and nothing about the API. It now also calls `GET /v1/listings` unauthenticated
+and requires exactly **401** — 404 would mean the route never registered, 500
+that the query is broken, and 200 that the feed is open to the internet
+(DECISIONS 6.2).
+
+### Documentation
+
+`.env.prod.example` carries the Phase 4 variables with production values and
+the warning that `PHONE_HASH_KEY` cannot be rotated. `RUNBOOK.md` 4.1 covers
+getting a `BOT_TOKEN` and registering the Mini App with BotFather, 4.2 lists
+every required variable, 4.4 adds the post-deploy checks that catch a silently
+open API or publicly served originals, and section 6 documents backup and
+restore.
+
+### What is still missing
+
+1. **Backups sit on the same machine as the database.** Protects against a
+   dropped volume, a bad migration or a mistaken `DELETE` — not against losing
+   the server. An off-box copy inside Uzbekistan (SPEC 13) is next.
+2. **No alerting.** `backup_failed` and `backup_suspiciously_small` are logged
+   and nothing watches them. Phase 7.
+3. **The 200k performance target is unmeasured.**
+4. **Nothing has been deployed.** Needs a server, a domain, DNS and a
+   `BOT_TOKEN` — all human steps.

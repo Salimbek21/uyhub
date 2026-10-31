@@ -812,3 +812,48 @@ restarts. No path through the script removes a volume.
 `/readyz` is the right probe because `/healthz` deliberately touches no dependency —
 it would report success against a broken database. Migrations run before the switch,
 so a migration failure leaves the previous version serving.
+
+---
+
+## Production readiness
+
+### 6.1 Postgres is backed up nightly; photos are not
+
+**Context.** The deployment had a `./backup` mount and nothing writing to it.
+The gap was not hypothetical: a Docker volume was lost overnight during
+development and took 47 collected posts and 398 photos with it.
+
+**Decision.** A `backup` service dumps Postgres on an interval (default daily)
+into `infra/backup/`, keeping 14 days. Object storage is left out.
+
+**Why the asymmetry.** The two losses are not comparable. A lost photo is a
+missing image on a card, and it can be re-downloaded while the source post is
+still up. A lost `raw_messages` row cannot be recovered at all — Telegram
+history is only retrievable while the post exists, and the posts worth having
+are precisely the ones that get deleted. Photos are also the bulk of the bytes,
+so backing them up would dominate the cost of protecting the thing that
+actually cannot be rebuilt.
+
+**Consequences.** Losing the media volume means a feed of listings with no
+pictures until they are re-collected, which is degraded but not destroyed.
+Losing Postgres means losing at most a day.
+
+The dumps sit on the same machine as the database, so this protects against a
+dropped volume, a bad migration and a mistaken `DELETE` — not against losing
+the server. An off-box copy inside Uzbekistan (SPEC 13) is the next step and is
+recorded as an open gap in `RUNBOOK.md` section 6.
+
+### 6.2 The deploy smoke test asserts a 401, not a 200
+
+**Context.** The smoke test checked `/readyz`, which proves Postgres, Redis and
+object storage answer — and nothing about the API itself.
+
+**Decision.** It now also calls `GET /v1/listings` with no credentials and
+requires exactly `401`.
+
+**Why that code.** A 404 would mean the route never registered, a 500 that the
+query is broken, and a **200 that the feed is being served to anyone on the
+internet**. Only 401 proves the route exists *and* authentication is switched
+on. It is the one assertion that catches a misconfigured `BOT_TOKEN` or a
+stray `API_ALLOW_INSECURE_AUTH=true` before users do; `deploy.sh` refuses the
+latter earlier still.

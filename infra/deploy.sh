@@ -42,7 +42,8 @@ perms=$(stat -c '%a' .env 2>/dev/null || stat -f '%OLp' .env)
 [[ "$perms" == "600" ]] || warn ".env is mode $perms; it should be 600. Run: chmod 600 .env"
 
 for required in DOMAIN ACME_EMAIL POSTGRES_PASSWORD DATABASE_URL S3_SECRET_KEY \
-                TG_API_ID TG_API_HASH PHONE_HASH_KEY; do
+                TG_API_ID TG_API_HASH PHONE_HASH_KEY \
+                BOT_TOKEN CORS_ALLOW_ORIGINS MEDIA_PUBLIC_BASE_URL; do
     grep -qE "^${required}=.+" .env || die "$required is not set in .env"
 done
 
@@ -53,6 +54,25 @@ for placeholder in THE_SAME_PASSWORD example.uz replace-with-your; do
         die ".env still contains the placeholder '$placeholder'. Fill it in first."
     fi
 done
+
+# The API refuses to start with this on in production, but failing here is
+# clearer than a container that restarts in a loop. It makes every caller a
+# signed-in user (docs/DECISIONS.md 4.5).
+if grep -qiE '^API_ALLOW_INSECURE_AUTH=(true|1|yes)' .env; then
+    die "API_ALLOW_INSECURE_AUTH must be false in production: it accepts any caller as a user"
+fi
+
+# A wildcard here would let any site on the internet make authenticated calls
+# from a victim's browser.
+if grep -qE '^CORS_ALLOW_ORIGINS=.*\*' .env; then
+    die "CORS_ALLOW_ORIGINS must list exact origins, never '*'"
+fi
+
+# The public media host must not point at the originals bucket: those photos
+# carry whatever the seller's camera recorded.
+if grep -qE "^MEDIA_PUBLIC_BASE_URL=.*$(grep -E '^S3_BUCKET_RAW=' .env | cut -d= -f2-)" .env; then
+    die "MEDIA_PUBLIC_BASE_URL points at the private originals bucket"
+fi
 
 command -v docker >/dev/null || die "docker is not installed"
 docker compose version >/dev/null 2>&1 || die "the docker compose plugin is not installed"
@@ -158,6 +178,19 @@ done
 if [[ "$ready" != true ]]; then
     warn "/readyz did not come up in time:"
     "${COMPOSE[@]}" exec -T api curl -sS http://127.0.0.1:8000/readyz || true
+    "${COMPOSE[@]}" logs --tail=80 api || true
+    rollback
+    exit 1
+fi
+
+# `/readyz` only proves the dependencies answer. This proves the feed route
+# exists and that authentication is switched on: an unauthenticated call must
+# be refused with 401, not served with 200 and not blown up with 500.
+feed_status=$("${COMPOSE[@]}" exec -T api \
+    curl -s -o /dev/null -w '%{http_code}' http://127.0.0.1:8000/v1/listings 2>/dev/null || echo "000")
+if [[ "$feed_status" != "401" ]]; then
+    warn "GET /v1/listings without credentials returned $feed_status; expected 401."
+    [[ "$feed_status" == "200" ]] && warn "The feed is being served to unauthenticated callers."
     "${COMPOSE[@]}" logs --tail=80 api || true
     rollback
     exit 1
