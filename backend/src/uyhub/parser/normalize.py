@@ -17,6 +17,7 @@ from decimal import Decimal
 
 from uyhub.core.config import Settings, get_settings
 from uyhub.core.phones import hash_phones, strip_phones
+from uyhub.i18n import DISTRICT_NAMES_UZ
 from uyhub.models.enums import Currency, DealType, District, PropertyType
 from uyhub.parser.schema import TITLE_MAX_LENGTH, Extraction, RawExtraction
 
@@ -31,21 +32,6 @@ RENT_PRICE_USD_MAX = Decimal(20_000)
 
 CONFIDENCE_REVIEW_BELOW = 0.35
 """Below this we have read so little of the post that a human should look."""
-
-DISTRICT_NAMES_UZ: dict[District, str] = {
-    District.BEKTEMIR: "Bektemir",
-    District.CHILONZOR: "Chilonzor",
-    District.MIROBOD: "Mirobod",
-    District.MIRZO_ULUGBEK: "Mirzo Ulug'bek",
-    District.OLMAZOR: "Olmazor",
-    District.SERGELI: "Sergeli",
-    District.SHAYXONTOHUR: "Shayxontohur",
-    District.UCHTEPA: "Uchtepa",
-    District.YAKKASAROY: "Yakkasaroy",
-    District.YASHNOBOD: "Yashnobod",
-    District.YUNUSOBOD: "Yunusobod",
-    District.YANGIHAYOT: "Yangihayot",
-}
 
 PROPERTY_NAMES_UZ: dict[PropertyType, str] = {
     PropertyType.APARTMENT: "kvartira",

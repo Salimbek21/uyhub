@@ -493,3 +493,75 @@ either.
 Phase 4 — the API. `/v1/listings` with filters and cursor pagination, plus
 `initData` authentication, which is the first thing that needs a `BOT_TOKEN`
 from the product owner.
+
+---
+
+## Phase 4 — API: read path and authentication ✅
+
+Completed 2026-10-31. **The first step that serves the data to anyone.**
+
+Scope was cut deliberately to the read path, so the Mini App can be wired to
+real listings as soon as possible: favourites and saved searches stay in the
+Mini App's local storage, and the admin endpoints wait for the bot. Six
+decisions are written up in `DECISIONS.md` 4.1–4.6.
+
+### What was built
+
+**`api/auth.py`** — Telegram's `initData` check, reproduced from the
+documented algorithm. The inversion in the key derivation is the easy part to
+get wrong (`HMAC(key="WebAppData", msg=bot_token)`, not the other way round),
+and the comparison is `hmac.compare_digest` so a forged signature cannot be
+built a byte at a time. Nothing but the Telegram user id is ever logged.
+
+**`api/feed.py`** — filters to SQL, and keyset pagination. Separate from the
+router because the two subtle parts — nulls-last ordering and keeping the sort
+a total order — are worth reading on their own.
+
+**`api/cursor.py`** — opaque cursors carrying the sort, the last row's key, its
+id and a fingerprint of the filters.
+
+**`api/routers/`** — `GET /v1/listings`, `GET /v1/listings/{id}`, `GET /v1/meta`.
+
+**`core/ratelimit.py`** — a Redis token bucket as one atomic Lua script, per IP
+and per user. It fails open: a limiter that fails closed takes the API down
+with Redis.
+
+**New config** — `BOT_TOKEN`, `CORS_ALLOW_ORIGINS` (exact origins, never `*`),
+`MEDIA_PUBLIC_BASE_URL`, `API_ALLOW_INSECURE_AUTH`, and the rate-limit pair.
+Migration `0004` adds the `price_per_m2` expression index.
+
+### Verified
+
+Against the running service and the real 27 listings, rather than with tests
+(DECISIONS 4.6 — the product owner chose speed to production for this phase):
+
+| Check | Result |
+|---|---|
+| Paging the whole feed at `limit=5` | 6 pages, 27 ids, none repeated or missing |
+| Filters: deal type, rooms, price, districts, photos, text | each returns a plausible subset |
+| All four sorts | ordered correctly, nulls last |
+| Detail | 7 photos, source link to the original post, no phone |
+| Phone leakage | no `phone` key, no 9-digit run anywhere in the response |
+| `initData` | valid accepted; tampered byte, substituted user id, 25-hour-old date, missing hash, wrong scheme, no header all rejected |
+| `APP_ENV=production` with insecure auth | refuses to start |
+| `price_per_m2` index | `EXPLAIN` shows an index scan with no sort |
+
+`make test` — the existing 527 still pass. `make lint` clean.
+
+### Known gaps
+
+1. **No tests for this phase.** Verified by hand, once. `api/auth.py` and
+   `api/feed.py` are where that risk sits (DECISIONS 4.6).
+2. **`BOT_TOKEN` is not set.** Until it is, the API can only run with
+   `API_ALLOW_INSECURE_AUTH=true`, which production refuses.
+3. **`is_favorite` is always false.** The Mini App overlays its own local set.
+4. **The 200k measurement has not been run** — the index was confirmed usable,
+   but the p95 number SPEC 9.3 names is still unmeasured.
+5. **No `/listings/{id}/contact`.** SPEC 9.2 describes one; phones are stored
+   only as hashes, so there is nothing to return (DECISIONS P.2).
+
+### Next steps
+
+Phase 5 — wire the Mini App to the API: replace the bodies in
+`miniapp/src/data/client.ts` with `fetch` calls, and remove the "Show phone"
+button, which promises something the system deliberately cannot do.

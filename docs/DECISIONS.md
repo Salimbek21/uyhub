@@ -642,6 +642,99 @@ where the old default would have reported 27 flats.
 
 ---
 
+## Phase 4 — API (read path and authentication)
+
+### 4.1 Keyset pagination, never OFFSET
+
+**Context.** SPEC 9.3 asks for p95 under 200 ms on `/listings` with 200k listings.
+
+**Decision.** The cursor carries the last row's sort value and id, and the next
+page is a range scan from there. `OFFSET 10000` would make Postgres walk and
+discard ten thousand rows, so the cost of a page would grow with its number.
+
+**Consequences.** Every sort has to end in `id` to be a total order — without
+it two listings at the same price can each be skipped or repeated at a page
+boundary. Price sorts put nulls last, which makes the "after this row"
+predicate asymmetric: once paging reaches the null tail there is no value left
+to compare, only ids. Both are in `api/feed.py` with the reasoning inline.
+
+### 4.2 The cursor carries a fingerprint of the filters
+
+**Context.** A client can change a filter and keep paging with the cursor it
+already has.
+
+**Decision.** The cursor holds a 12-character hash of the filter set and the
+sort. A mismatch is a `400`, not a silently spliced result set.
+
+**Consequences.** Changing a filter means starting from the first page, which
+is what the user expects anyway. A hash collision would only produce a
+confusing page, never wrong data leaving the database.
+
+### 4.3 `total` is counted once and cached for 60 seconds
+
+**Context.** `COUNT(*)` with filters is the most expensive part of the request
+at 200k rows, and it is recomputed on every page.
+
+**Decision.** Count per filter set, cache in Redis for a minute, serve the
+cached number to later pages. `null` when counting fails.
+
+**Consequences.** The number behind "27 results" can be a minute stale, which
+is invisible at the resolution it is displayed. It also stops jumping between
+pages, which an exact per-page count would do as listings arrive.
+
+### 4.4 `needs_review` listings are not served
+
+**Context.** SPEC 9.2 does not say whether the feed shows them.
+
+**Decision.** It does not. The flag means the parser judged its own reading
+implausible — a price or an area outside the sanity bands of SPEC 6.3.
+
+**Consequences.** Showing them would be knowingly displaying something we
+believe is wrong. They wait for the admin queue instead. If the flag ever fires
+too often this becomes visible as missing inventory rather than as bad data,
+which is the better way round.
+
+### 4.5 `API_ALLOW_INSECURE_AUTH`, and why production refuses to start with it
+
+**Context.** `initData` cannot be verified without a `BOT_TOKEN`, and the token
+comes from @BotFather. Without an escape hatch the feed could not be opened in
+a browser at all before then.
+
+**Decision.** A flag that accepts an unauthenticated caller as a fixed test
+user, plus a settings validator that raises at startup when it is set and
+`APP_ENV=production`.
+
+**Consequences.** The one check that proves a caller came from Telegram can be
+turned off, so it is made impossible to leave on by accident in the only
+environment where it would matter. It also logs a warning on every start.
+
+### 4.6 Phase 4 ships without its own tests
+
+**Context.** The product owner chose speed to production over test coverage
+for this phase ("test yozish shart emas, tezroq prodga chiqarishimiz kerak",
+2026-10-31). This departs from CLAUDE.md, which asks for tests each phase.
+
+**Decision.** No test files were added for the API. The existing 527 tests
+still run and pass, and the phase was verified by exercising the running
+service against the real 27 listings: paging the whole feed with `limit=5`
+(27 unique ids across 6 pages, none repeated or missing), every filter and
+sort, the detail endpoint, and `EXPLAIN` confirming the `price_per_m2`
+expression index can order the query without a sort.
+
+Authentication was verified the same way rather than left unchecked, because a
+broken signature check is a security hole rather than a bug: a locally signed
+`initData` is accepted, while a tampered byte, a substituted user id, a
+25-hour-old `auth_date`, a missing hash, a wrong scheme and a missing header
+are each rejected.
+
+**Consequences.** These checks were run once, by hand, and nothing re-runs
+them. A later change to the cursor, the filters or the signature check will not
+be caught by CI. The risk is concentrated in `api/auth.py` and `api/feed.py`,
+and writing tests for those two is the first thing to do if the API starts
+changing often.
+
+---
+
 ## Deployment infrastructure (prepared ahead of Phase 8)
 
 Built early because the product owner needs a public HTTPS URL: Telegram refuses to

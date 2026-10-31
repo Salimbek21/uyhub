@@ -13,11 +13,11 @@ from __future__ import annotations
 
 from functools import lru_cache
 from pathlib import Path
-from typing import Literal
+from typing import Annotated, Literal
 from urllib.parse import urlsplit, urlunsplit
 
-from pydantic import Field, SecretStr, field_validator
-from pydantic_settings import BaseSettings, SettingsConfigDict
+from pydantic import Field, SecretStr, field_validator, model_validator
+from pydantic_settings import BaseSettings, NoDecode, SettingsConfigDict
 
 Environment = Literal["local", "test", "staging", "production"]
 LogFormat = Literal["json", "console"]
@@ -62,6 +62,44 @@ class Settings(BaseSettings):
     # -- API -----------------------------------------------------------------
     api_host: str = Field(default="127.0.0.1", alias="API_HOST")
     api_port: int = Field(default=8000, ge=1, le=65535, alias="API_PORT")
+
+    cors_allow_origins: Annotated[list[str], NoDecode] = Field(
+        default_factory=list, alias="CORS_ALLOW_ORIGINS"
+    )
+    """Exact origins allowed to call the API — the Mini App's, and nothing else.
+
+    ``NoDecode`` stops pydantic-settings from trying to JSON-parse the value
+    before validation, which is what lets the comma-separated spelling below
+    reach the validator at all.
+
+    SPEC 9.3 asks for strict CORS. Empty means no browser origin is allowed,
+    which is the right default: a missing variable must not silently open the
+    API to every site."""
+
+    media_public_base_url: str = Field(
+        default="http://localhost:8333/uyhub-media",
+        alias="MEDIA_PUBLIC_BASE_URL",
+    )
+    """Where the public bucket is reachable from a browser. Derivatives only —
+    originals stay private and are never addressed through this."""
+
+    api_rate_limit_per_minute: int = Field(
+        default=120, ge=1, le=10_000, alias="API_RATE_LIMIT_PER_MINUTE"
+    )
+    api_rate_limit_burst: int = Field(default=40, ge=1, le=10_000, alias="API_RATE_LIMIT_BURST")
+
+    api_allow_insecure_auth: bool = Field(default=False, alias="API_ALLOW_INSECURE_AUTH")
+    """Accept requests with no ``initData`` and treat them as a fixed test user.
+
+    This exists so the feed can be opened in a plain browser before a
+    ``BOT_TOKEN`` is issued. It disables the only check that proves a caller
+    came from Telegram, so startup refuses it in production outright rather
+    than trusting that nobody set it (DECISIONS 4.5)."""
+
+    # -- Bot -----------------------------------------------------------------
+    bot_token: SecretStr = Field(default=SecretStr(""), alias="BOT_TOKEN")
+    """From @BotFather. The API needs it only to verify ``initData``
+    signatures; the bot itself arrives in a later phase."""
 
     # -- Collector (Telethon userbot) ----------------------------------------
     # The pair identifies the application, not the account; logging in is a
@@ -125,6 +163,25 @@ class Settings(BaseSettings):
             raise ValueError(msg)
         return upper
 
+    @field_validator("cors_allow_origins", mode="before")
+    @classmethod
+    def _split_origins(cls, value: object) -> object:
+        """Accept `a,b` as well as a JSON list — env files are written by hand."""
+        if isinstance(value, str):
+            return [origin.strip() for origin in value.split(",") if origin.strip()]
+        return value
+
+    @model_validator(mode="after")
+    def _refuse_insecure_auth_in_production(self) -> Settings:
+        if self.api_allow_insecure_auth and self.is_production:
+            msg = (
+                "API_ALLOW_INSECURE_AUTH is a development-only escape hatch and "
+                "cannot be enabled when APP_ENV=production: it accepts any caller "
+                "as a signed-in user"
+            )
+            raise ValueError(msg)
+        return self
+
     @field_validator("database_url")
     @classmethod
     def _require_async_driver(cls, value: str) -> str:
@@ -163,6 +220,11 @@ class Settings(BaseSettings):
         API, migrations) runs fine with the empty defaults.
         """
         return self.tg_api_id > 0 and bool(self.tg_api_hash.get_secret_value())
+
+    @property
+    def has_bot_token(self) -> bool:
+        """True when ``initData`` signatures can actually be verified."""
+        return bool(self.bot_token.get_secret_value())
 
 
 def _mask_url_password(url: str) -> str:

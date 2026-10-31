@@ -12,16 +12,19 @@ from contextlib import asynccontextmanager
 from typing import Literal
 
 from fastapi import FastAPI
+from fastapi.middleware.cors import CORSMiddleware
 from fastapi.responses import JSONResponse
 from pydantic import BaseModel
 
 from uyhub import __version__
+from uyhub.api.routers import listings, meta
 from uyhub.core.config import get_settings
 from uyhub.core.db import check_database, dispose_engine
 from uyhub.core.errors import DependencyUnavailableError
 from uyhub.core.logging import configure_logging, get_logger
 from uyhub.core.metrics import metrics_app
-from uyhub.core.redis import check_redis, close_redis
+from uyhub.core.ratelimit import RateLimiter
+from uyhub.core.redis import check_redis, close_redis, get_redis
 from uyhub.core.s3 import check_s3
 
 log = get_logger(__name__)
@@ -51,14 +54,31 @@ class ReadinessResponse(BaseModel):
 
 
 @asynccontextmanager
-async def lifespan(_app: FastAPI) -> AsyncIterator[None]:
+async def lifespan(app: FastAPI) -> AsyncIterator[None]:
     settings = get_settings()
     log.info(
         "api.starting",
         app_env=settings.app_env,
         version=__version__,
         database=settings.safe_database_url,
+        cors_origins=len(settings.cors_allow_origins),
+        insecure_auth=settings.api_allow_insecure_auth,
     )
+    if settings.api_allow_insecure_auth:
+        # Loud, every start, for as long as it is on: this is the switch that
+        # makes every caller a signed-in user (DECISIONS 4.5).
+        log.warning("api.insecure_auth_enabled")
+    if not settings.has_bot_token and not settings.api_allow_insecure_auth:
+        log.warning("api.no_bot_token", detail="every authenticated request will be rejected")
+
+    # One connection pool for the process, shared by every request.
+    app.state.redis = get_redis(settings)
+    app.state.rate_limiter = RateLimiter(
+        app.state.redis,
+        per_minute=settings.api_rate_limit_per_minute,
+        burst=settings.api_rate_limit_burst,
+    )
+
     yield
     await dispose_engine()
     await close_redis()
@@ -82,6 +102,21 @@ def create_app() -> FastAPI:
         docs_url="/docs" if not settings.is_production else None,
         redoc_url=None,
     )
+
+    # SPEC 9.3: only the Mini App's origin. `allow_origins` is an exact list
+    # and never `*` — the Mini App sends credentials, and a wildcard with
+    # credentials is both refused by browsers and wrong to ask for.
+    app.add_middleware(
+        CORSMiddleware,
+        allow_origins=settings.cors_allow_origins,
+        allow_credentials=True,
+        allow_methods=["GET", "POST", "PUT", "PATCH", "DELETE"],
+        allow_headers=["Authorization", "Content-Type"],
+        max_age=600,
+    )
+
+    app.include_router(listings.router)
+    app.include_router(meta.router)
 
     @app.get("/healthz", response_model=HealthResponse, tags=["ops"])
     async def healthz() -> HealthResponse:

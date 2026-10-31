@@ -508,6 +508,47 @@ Telegram Web embeds the Mini App in an iframe from `web.telegram.org`. The
 `X-Frame-Options` is deliberately **not** set — it would override the CSP in some
 browsers and the app would render as a blank frame inside Telegram.
 
+## 4c. Running and configuring the API
+
+```bash
+make up                                   # Postgres, Redis, SeaweedFS
+make migrate
+uv --directory backend run uyhub api      # or: uvicorn uyhub.api.app:app
+curl -s 'localhost:8000/v1/listings?limit=3' | jq
+```
+
+`/docs` is served in every environment except production.
+
+### The variables that matter
+
+| Variable | What goes wrong if it is wrong |
+|---|---|
+| `BOT_TOKEN` | Without it every authenticated request is rejected with `server_has_no_bot_token`. The API logs a warning at startup when it is missing. |
+| `CORS_ALLOW_ORIGINS` | Exact origins, comma-separated, never `*`. Empty means no browser may call the API — a missing value must not silently open it. The Mini App's own origin is the only one that belongs here. |
+| `MEDIA_PUBLIC_BASE_URL` | Where a browser reaches the public bucket. Point it at the *public* path only; the originals bucket stays private. Wrong value means every photo is a broken image. |
+| `API_RATE_LIMIT_PER_MINUTE` / `_BURST` | Token bucket, per IP and per user. The limiter fails open — if Redis is down, requests pass and a warning is logged. |
+| `API_ALLOW_INSECURE_AUTH` | Development only. Accepts callers with no `initData` as a fixed test user. Startup refuses it when `APP_ENV=production`. |
+
+### Getting a `BOT_TOKEN`
+
+Talk to [@BotFather](https://t.me/BotFather) → `/newbot` → the token is the
+`123456:ABC-DEF...` string. Put it in `.env` on the server only; it is a
+credential and `.env` is gitignored. To rotate it, `/revoke` in BotFather and
+replace the value — every `initData` signed by the old token stops validating
+immediately, so expect one wave of 401s as open Mini App sessions refresh.
+
+### Serving photos
+
+Derivatives (`*_large.webp`, `*_thumb.webp`) live in the public bucket and are
+served directly with long cache headers. Originals live in `uyhub-raw` and must
+return 403 to an anonymous request — worth re-checking after any storage
+change:
+
+```bash
+curl -s -o /dev/null -w '%{http_code}\n' "$MEDIA_PUBLIC_BASE_URL/listings/<id>/0_thumb.webp"   # 200
+curl -s -o /dev/null -w '%{http_code}\n' "$S3_ENDPOINT_URL/uyhub-raw/<key>"                     # 403
+```
+
 ## 5. Rotating secrets
 
 TBD — Phase 7/8. Partial notes that already matter:

@@ -29,6 +29,7 @@ from sqlalchemy import (
     UniqueConstraint,
     desc,
     func,
+    text,
 )
 from sqlalchemy.dialects.postgresql import ARRAY, UUID
 from sqlalchemy.orm import Mapped, mapped_column
@@ -162,6 +163,15 @@ class Listing(UuidMixin, TimestampMixin, Base):
             "landmark",
             postgresql_using="gin",
             postgresql_ops={"landmark": "gin_trgm_ops"},
+        ),
+        # The `price_per_m2` sort (SPEC 9.2). The expression must be spelled
+        # exactly as `api.feed.price_per_m2_expression` renders it or the
+        # planner will not match the two.
+        Index(
+            "ix_listings_price_per_m2",
+            "status",
+            text("(price_usd / nullif(area_m2, 0))"),
+            "id",
         ),
     )
 
